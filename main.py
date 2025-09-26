@@ -19,7 +19,7 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 OWNER_ID = int(os.getenv("OWNER_ID", "0"))
 REQUIRED_CHANNEL = os.getenv("REQUIRED_CHANNEL", "@RHINOSOUL_TM")
 SUPPORT_USERNAME = os.getenv("SUPPORT_USERNAME", "@OLDKASEB")
-TZ_NAME = os.getenv("TZ", "Asia/Tehran)  # نمایشی
+TZ_NAME = os.getenv("TZ", "Asia/Tehran")  # نمایشی
 
 if not BOT_TOKEN or not DATABASE_URL or OWNER_ID == 0:
     raise RuntimeError("ENV های BOT_TOKEN, DATABASE_URL, OWNER_ID باید تنظیم شوند.")
