@@ -263,7 +263,7 @@ async def start_game_cb(c: CallbackQuery):
     mn, mx = int(pending["range_min"]), int(pending["range_max"])
     target = random.randint(mn, mx)
 
-    # اول بازی رو بسازیم (بدون announce_msg_id)
+    # اول بازی رو بسازیم
     async with pool.acquire() as conn:
         rec = await conn.fetchrow("""
             INSERT INTO games (group_id, creator_id, range_min, range_max, target_number, started_at, status)
@@ -272,20 +272,21 @@ async def start_game_cb(c: CallbackQuery):
         """, c.message.chat.id, c.from_user.id, mn, mx, target)
         game_id = int(rec["id"])
 
-    # پیام اصلی با دکمه «منم بازی»
+    # پیام بازی با دکمه
     announce = await c.message.reply(
         render_participants_text([], mn, mx),
         reply_markup=join_kb(game_id)
     )
 
-    # ذخیره آیدی پیام در دیتابیس
+    # ذخیره آیدی پیام
     async with pool.acquire() as conn:
         await conn.execute("UPDATE games SET announce_msg_id=$1 WHERE id=$2", announce.message_id, game_id)
-
+        
 # دکمه عمومی «منم بازی»
 @dp.callback_query(F.data.startswith("join_active_"))
 async def join_active(c: CallbackQuery):
     game_id = int(c.data.split("_")[-1])
+    print("✅ دکمه کلیک شد:", c.data)   # برای تست در ترمینال
 
     if not await is_member_required_channel(c.from_user.id):
         await c.answer("اول باید عضو کانال بشی ❌", show_alert=True)
@@ -304,7 +305,6 @@ async def join_active(c: CallbackQuery):
     announce_msg_id = int(game["announce_msg_id"])
     participant_ids = await get_participants(game_id)
 
-    # ادیت پیام با لیست شرکت‌کننده‌ها
     await bot.edit_message_text(
         chat_id=c.message.chat.id,
         message_id=announce_msg_id,
