@@ -19,7 +19,7 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 OWNER_ID = int(os.getenv("OWNER_ID", "0"))
 REQUIRED_CHANNEL = os.getenv("REQUIRED_CHANNEL", "@RHINOSOUL_TM")
 SUPPORT_USERNAME = os.getenv("SUPPORT_USERNAME", "@OLDKASEB")
-TZ_NAME = os.getenv("TZ", "Asia/Muscat")  # نمایشی
+TZ_NAME = os.getenv("TZ", "Asia/Tehran)  # نمایشی
 
 if not BOT_TOKEN or not DATABASE_URL or OWNER_ID == 0:
     raise RuntimeError("ENV های BOT_TOKEN, DATABASE_URL, OWNER_ID باید تنظیم شوند.")
@@ -282,10 +282,10 @@ async def resolve_user_id(text: str) -> int | None:
 async def is_member_required_channel(user_id: int) -> bool:
     try:
         member = await bot.get_chat_member(REQUIRED_CHANNEL, user_id)
-        return member.status in (ChatMemberStatus.MEMBER, ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.CREATOR)
+        return member.status in ("member", "administrator", "creator")
     except:
         return False
-
+        
 def main_panel():
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="انتخاب رنج", callback_data="range")],
