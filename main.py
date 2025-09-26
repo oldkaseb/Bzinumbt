@@ -3,6 +3,7 @@ import os
 import random
 import re
 from typing import List
+from aiogram.filters.command import Command
 
 from aiogram import Bot, Dispatcher, F
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
@@ -350,6 +351,10 @@ async def bot_stats(m: Message):
         lines.append(f"• {g['title']} ({g['id']}) — {owner}")
 
     await m.answer("\n".join(lines), parse_mode="HTML")
+
+@dp.message(Command("start"))
+async def handle_start_command(m: Message):
+    await start_pv(m)  # همون تابعی که برای پیام «شروع» در PV داریم
 
 async def main():
     await init_db()
