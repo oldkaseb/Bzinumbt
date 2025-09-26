@@ -197,7 +197,6 @@ def render_participants_text(participant_ids: List[int], mn: int, mx: int) -> st
     for idx, uid in enumerate(participant_ids, start=1):
         lines.append(f"{idx}. <a href='tg://user?id={uid}'>کاربر</a>")
     return f"بازی شروع شد! یک عدد بین {mn} تا {mx} حدس بزنید.\n\nشرکت‌کنندگان:\n" + "\n".join(lines)
-
 # ========= دستورات متنی و جریان‌ها =========
 
 # شروع در پیوی با متن «شروع»
@@ -247,7 +246,7 @@ async def custom_range(m: Message):
     else:
         await m.reply("فرمت درست نیست. مثال: 50-200")
 
-# شروع بازی با دکمه در پنل اصلی
+# شروع بازی
 @dp.callback_query(F.data == "start_game")
 async def start_game_cb(c: CallbackQuery):
     await upsert_user(c.from_user)
@@ -265,19 +264,30 @@ async def start_game_cb(c: CallbackQuery):
     mn, mx = int(pending["range_min"]), int(pending["range_max"])
     target = random.randint(mn, mx)
 
-    # پیام اعلام بازی با دکمه «منم بازی»
-    announce = await c.message.reply(render_participants_text([], mn, mx), reply_markup=join_kb(0))
-    # حالا بازی فعال را می‌سازیم با آیدی پیام
-    game_id = await create_active_game(c.message.chat.id, c.from_user.id, mn, mx, target, announce.message_id)
-    # ادیت کیبورد برای تزریق game_id
-    await bot.edit_message_reply_markup(chat_id=c.message.chat.id, message_id=announce.message_id,
-                                        reply_markup=join_kb(game_id))
+    # اول یک پیام خالی می‌فرستیم
+    announce = await c.message.reply("بازی در حال آماده‌سازی است...")
 
-# دکمه عمومی «منم بازی»؛ اضافه کردن شرکت‌کننده و ادیت همان پیام
+    # ساخت بازی فعال با ذخیره آیدی پیام
+    game_id = await create_active_game(
+        c.message.chat.id,
+        c.from_user.id,
+        mn, mx, target,
+        announce.message_id
+    )
+
+    # ادیت پیام با متن و دکمه «منم بازی»
+    await bot.edit_message_text(
+        chat_id=c.message.chat.id,
+        message_id=announce.message_id,
+        text=render_participants_text([], mn, mx),
+        reply_markup=join_kb(game_id)
+    )
+
+# دکمه عمومی «منم بازی»
 @dp.callback_query(F.data.startswith("join_active_"))
 async def join_active(c: CallbackQuery):
     game_id = int(c.data.split("_")[-1])
-    # چک عضویت
+
     if not await is_member_required_channel(c.from_user.id):
         await c.answer("اول باید عضو کانال بشی ❌", show_alert=True)
         return
@@ -285,7 +295,6 @@ async def join_active(c: CallbackQuery):
     await upsert_user(c.from_user)
     await add_participant(game_id, c.from_user.id)
 
-    # دریافت اطلاعات بازی برای ادیت پیام
     async with pool.acquire() as conn:
         game = await conn.fetchrow("SELECT * FROM games WHERE id=$1", game_id)
     if not game:
@@ -296,16 +305,13 @@ async def join_active(c: CallbackQuery):
     announce_msg_id = int(game["announce_msg_id"])
     participant_ids = await get_participants(game_id)
 
-    # ادیت متن همان پیام اعلام بازی
-    try:
-        await bot.edit_message_text(
-            chat_id=c.message.chat.id,
-            message_id=announce_msg_id,
-            text=render_participants_text(participant_ids, mn, mx),
-            reply_markup=join_kb(game_id)
-        )
-    except:
-        pass
+    # ادیت پیام با لیست شرکت‌کننده‌ها
+    await bot.edit_message_text(
+        chat_id=c.message.chat.id,
+        message_id=announce_msg_id,
+        text=render_participants_text(participant_ids, mn, mx),
+        reply_markup=join_kb(game_id)
+    )
 
     await c.answer("به بازی اضافه شدی ✅", show_alert=False)
 
