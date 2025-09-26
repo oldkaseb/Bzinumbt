@@ -257,31 +257,30 @@ async def start_game_cb(c: CallbackQuery):
 
     pending = await get_pending_game(c.message.chat.id)
     if not pending:
-        # اگر رنج انتخاب نشده، پیش‌فرض 1-10
         await set_group_range(c.message.chat.id, 1, 10)
         pending = await get_pending_game(c.message.chat.id)
 
     mn, mx = int(pending["range_min"]), int(pending["range_max"])
     target = random.randint(mn, mx)
 
-    # اول یک پیام خالی می‌فرستیم
-    announce = await c.message.reply("بازی در حال آماده‌سازی است...")
+    # اول بازی رو بسازیم (بدون announce_msg_id)
+    async with pool.acquire() as conn:
+        rec = await conn.fetchrow("""
+            INSERT INTO games (group_id, creator_id, range_min, range_max, target_number, started_at, status)
+            VALUES ($1,$2,$3,$4,$5, now(), 'active')
+            RETURNING id
+        """, c.message.chat.id, c.from_user.id, mn, mx, target)
+        game_id = int(rec["id"])
 
-    # ساخت بازی فعال با ذخیره آیدی پیام
-    game_id = await create_active_game(
-        c.message.chat.id,
-        c.from_user.id,
-        mn, mx, target,
-        announce.message_id
-    )
-
-    # ادیت پیام با متن و دکمه «منم بازی»
-    await bot.edit_message_text(
-        chat_id=c.message.chat.id,
-        message_id=announce.message_id,
-        text=render_participants_text([], mn, mx),
+    # پیام اصلی با دکمه «منم بازی»
+    announce = await c.message.reply(
+        render_participants_text([], mn, mx),
         reply_markup=join_kb(game_id)
     )
+
+    # ذخیره آیدی پیام در دیتابیس
+    async with pool.acquire() as conn:
+        await conn.execute("UPDATE games SET announce_msg_id=$1 WHERE id=$2", announce.message_id, game_id)
 
 # دکمه عمومی «منم بازی»
 @dp.callback_query(F.data.startswith("join_active_"))
@@ -314,7 +313,7 @@ async def join_active(c: CallbackQuery):
     )
 
     await c.answer("به بازی اضافه شدی ✅", show_alert=False)
-
+    
 # پایان بازی با متن «اتمام بازی»
 @dp.message(F.chat.type.in_({"group","supergroup"}) & F.text.lower() == "اتمام بازی")
 async def end_game(m: Message):
