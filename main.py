@@ -1,311 +1,556 @@
+# -*- coding: utf-8 -*-
+
 import os
-import asyncio
-import asyncpg
-from aiogram import Bot, Dispatcher, types
-from aiogram.filters import Command
-from aiogram.fsm.state import State, StatesGroup
-from aiogram.fsm.context import FSMContext
-from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-from datetime import datetime, timedelta
-import re
+import logging
+from telegram import (
+    Update,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    Bot,
+    ChatMember,
+    ChatMemberUpdated,
+)
+from telegram.ext import (
+    Application,
+    CommandHandler,
+    ContextTypes,
+    MessageHandler,
+    filters,
+    CallbackQueryHandler,
+    ChatMemberHandler,
+)
+import psycopg2
+from psycopg2 import sql
 
-# ====================== CONFIG ======================
-API_TOKEN = os.getenv("BOT_TOKEN")
-DB_URI = os.getenv("DATABASE_URL")
-CHANNEL_ID = "@RHINOSOUL_TM"
-SUPPORT = "@OLDKASEB"
+# --- Configuration Section ---
+# These values are hardcoded as requested.
+# Sensitive values (BOT_TOKEN, DATABASE_URL) are read from the environment.
+
 OWNER_IDS = [7662192190, 6041119040]
+SUPPORT_USERNAME = "OLDKASEB"
+FORCED_JOIN_CHANNEL = "@RHINOSOUL_TM"
+GROUP_INSTALL_LIMIT = 50
 
-# ====================== DATABASE ======================
-class Database:
-    def __init__(self):
-        self.pool = None
+# --- Logging Setup ---
+logging.basicConfig(
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
+)
+logger = logging.getLogger(__name__)
 
-    async def connect(self):
-        self.pool = await asyncpg.create_pool(dsn=DB_URI)
+# --- Database Setup ---
+DATABASE_URL = os.environ.get("DATABASE_URL")
 
-    async def execute(self, query, *args):
-        async with self.pool.acquire() as conn:
-            return await conn.execute(query, *args)
-
-    async def fetch(self, query, *args):
-        async with self.pool.acquire() as conn:
-            return await conn.fetch(query, *args)
-
-    async def fetchrow(self, query, *args):
-        async with self.pool.acquire() as conn:
-            return await conn.fetchrow(query, *args)
-
-db = Database()
-
-# ====================== FSM ======================
-class GuessGame(StatesGroup):
-    waiting_custom_range = State()
-
-# ====================== BOT INIT ======================
-bot = Bot(token=API_TOKEN)
-storage = MemoryStorage()
-dp = Dispatcher(storage=storage)
-
-# ====================== HELPERS ======================
-def to_english_numbers(text: str) -> str:
-    persian_numbers = "۰۱۲۳۴۵۶۷۸۹"
-    english_numbers = "0123456789"
-    for p, e in zip(persian_numbers, english_numbers):
-        text = text.replace(p, e)
-    return text
-
-async def is_channel_member(user_id: int):
+def get_db_connection():
+    """Establishes a connection to the PostgreSQL database."""
     try:
-        member = await bot.get_chat_member(chat_id=CHANNEL_ID, user_id=user_id)
-        return member.status != "left"
-    except:
-        return False
+        conn = psycopg2.connect(DATABASE_URL)
+        return conn
+    except Exception as e:
+        logger.error(f"Database connection failed: {e}")
+        return None
 
-async def get_admin_ids(chat_id: int):
-    admins = await bot.get_chat_administrators(chat_id)
-    return [admin.user.id for admin in admins]
+def setup_database():
+    """Creates necessary tables if they don't exist."""
+    conn = get_db_connection()
+    if conn:
+        try:
+            with conn.cursor() as cur:
+                # Users table
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS users (
+                        user_id BIGINT PRIMARY KEY,
+                        first_name VARCHAR(255),
+                        username VARCHAR(255),
+                        start_time TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+                    );
+                """)
+                # Groups table
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS groups (
+                        group_id BIGINT PRIMARY KEY,
+                        title VARCHAR(255),
+                        member_count INT,
+                        owner_mention VARCHAR(255),
+                        added_time TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+                    );
+                """)
+                # Start message table
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS start_message (
+                        id INT PRIMARY KEY,
+                        message_id BIGINT,
+                        chat_id BIGINT
+                    );
+                """)
+            conn.commit()
+            logger.info("Database setup complete.")
+        except Exception as e:
+            logger.error(f"Database setup failed: {e}")
+        finally:
+            conn.close()
 
-async def add_user(user_id: int, username: str):
-    await db.execute("""
-        INSERT INTO users(user_id, username)
-        VALUES($1, $2)
-        ON CONFLICT (user_id) DO UPDATE SET username=$2
-    """, user_id, username or "")
+# --- Helper Functions ---
 
-async def update_score(user_id: int, score: int):
-    await db.execute("""
-        UPDATE users
-        SET total_score = total_score + $1,
-            daily_score = daily_score + $1,
-            monthly_score = monthly_score + $1
-        WHERE user_id = $2
-    """, score, user_id)
+async def is_owner(user_id: int) -> bool:
+    """Checks if a user is one of the owners."""
+    return user_id in OWNER_IDS
 
-# ====================== TABLE INIT ======================
-async def init_tables():
-    await db.execute("""
-    CREATE TABLE IF NOT EXISTS users (
-        user_id BIGINT PRIMARY KEY,
-        username TEXT,
-        total_score INT DEFAULT 0,
-        daily_score INT DEFAULT 0,
-        monthly_score INT DEFAULT 0
-    );
-    """)
-    await db.execute("""
-    CREATE TABLE IF NOT EXISTS games (
-        game_id SERIAL PRIMARY KEY,
-        group_id BIGINT,
-        creator_id BIGINT,
-        target_number INT,
-        start_time TIMESTAMP,
-        end_time TIMESTAMP
-    );
-    """)
-    await db.execute("""
-    CREATE TABLE IF NOT EXISTS participants (
-        game_id INT REFERENCES games(game_id),
-        user_id BIGINT REFERENCES users(user_id),
-        score INT DEFAULT 0,
-        PRIMARY KEY(game_id,user_id)
-    );
-    """)
-
-# ====================== PRIVATE HANDLERS ======================
-@dp.message(Command("start"))
-async def start_cmd(message: types.Message):
-    kb = InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardmarkup(text="➕ افزودن به گروه", url="https://t.me/FindNumRS_Bot?startgroup=true")],
-            [InlineKeyboardmarkup(text="🆘 تماس با پشتیبان", url=f"https://t.me/{SUPPORT[1:]}")]
-        ]
-    )
-    await message.answer(
-        f"سلام 😎\nمن ربات FindNumRS_Bot هستم!\nبا من می‌تونی در گروه‌ها عدد حدس بزنی و امتیاز جمع کنی.\n"
-        "برای کاربر برتر ماهانه هدیه داریم 🎁\n\n"
-        f"کانال تیم: {CHANNEL_ID}\n"
-        f"پشتیبان: {SUPPORT}",
-        reply_markup=kb
-    )
-
-# ====================== GROUP GAME ======================
-active_games = {}  # {group_id: {"creator": id, "target": num, "participants": set(), "range": tuple}}
-
-RANGES = [
-    (1, 10), (1, 50), (1, 100), (1, 200), (1, 500),
-    (1, 1000), (1, 2000), (1, 5000), (1, 10000), (1, 20000)
-]
-
-def range_panel():
-    kb = InlineKeyboardMarkup(row_width=2)
-    for r in RANGES:
-        kb.insert(InlineKeyboardmarkup(f"{r[0]}-{r[1]}", callback_data=f"range_{r[0]}_{r[1]}"))
-    kb.add(
-        InlineKeyboardmarkup("🎯 رنج سفارشی", callback_data="custom_range"),
-        InlineKeyboardmarkup("❌ بستن", callback_data="close_panel")
-    )
-    return kb
-
-@dp.message(Command("start_game"))
-async def start_guess_game(message: types.Message, state: FSMContext):
-    admins = await get_admin_ids(message.chat.id)
-    if message.from_user.id not in admins:
-        await message.reply("❌ فقط ادمین‌ها می‌توانند بازی را شروع کنند.")
-        return
-    await message.reply("🎮 لطفا بازه بازی را انتخاب کنید:", reply_markup=range_panel())
-
-# ====================== CALLBACK HANDLERS ======================
-@dp.callback_query(lambda c: c.data.startswith("range_"))
-async def range_selected(cb: types.CallbackQuery):
-    group_id = cb.message.chat.id
-    parts = cb.data.split("_")
-    min_val, max_val = int(parts[1]), int(parts[2])
-    target = random.randint(min_val, max_val)
-    active_games[group_id] = {"creator": cb.from_user.id, "target": target, "participants": set(), "range": (min_val, max_val)}
-    await db.execute("INSERT INTO games(group_id, creator_id, target_number, start_time) VALUES($1,$2,$3,$4)",
-                     group_id, cb.from_user.id, target, datetime.now())
-    kb = InlineKeyboardMarkup(row_width=2)
-    kb.add(InlineKeyboardmarkup("🎮 منم بازی", callback_data="join_game"))
-    kb.add(InlineKeyboardmarkup("▶️ شروع بازی", callback_data="begin_game"))
-    kb.add(InlineKeyboardmarkup("❌ بستن", callback_data="close_game"))
-    await cb.message.edit_text(f"🎉 بازی آماده شد! بازه: {min_val}-{max_val}\nشرکت‌کنندگان وارد شوند:", reply_markup=kb)
-    await cb.answer()
-
-@dp.callback_query(lambda c: c.data == "custom_range")
-async def custom_range_cb(cb: types.CallbackQuery, state: FSMContext):
-    await cb.message.edit_text("لطفا رنج دلخواه را به صورت min-max وارد کنید (مثال: 1-1000)")
-    await state.set_state(GuessGame.waiting_custom_range)
-    await state.update_data(creator=cb.from_user.id)
-    await cb.answer()
-
-@dp.message(GuessGame.waiting_custom_range)
-async def custom_range_input(message: types.Message, state: FSMContext):
-    text = to_english_numbers(message.text)
-    match = re.match(r"(\d+)-(\d+)", text)
-    if not match:
-        await message.reply("❌ فرمت اشتباه است. لطفا به صورت min-max وارد کنید.")
-        return
-    min_val, max_val = int(match.group(1)), int(match.group(2))
-    target = random.randint(min_val, max_val)
-    group_id = message.chat.id
-    data = await state.get_data()
-    active_games[group_id] = {"creator": data["creator"], "target": target, "participants": set(), "range": (min_val, max_val)}
-    await db.execute("INSERT INTO games(group_id, creator_id, target_number, start_time) VALUES($1,$2,$3,$4)",
-                     group_id, data["creator"], target, datetime.now())
-    kb = InlineKeyboardMarkup(row_width=2)
-    kb.add(InlineKeyboardmarkup("🎮 منم بازی", callback_data="join_game"))
-    kb.add(InlineKeyboardmarkup("▶️ شروع بازی", callback_data="begin_game"))
-    kb.add(InlineKeyboardmarkup("❌ بستن", callback_data="close_game"))
-    await message.reply(f"🎉 بازی آماده شد! بازه: {min_val}-{max_val}", reply_markup=kb)
-    await state.clear()
-
-@dp.callback_query(lambda c: c.data == "close_panel")
-async def close_panel_cb(cb: types.CallbackQuery):
-    await cb.message.delete()
-    await cb.answer("پنل بسته شد ✅")
-
-# ====================== PARTICIPANTS ======================
-@dp.callback_query(lambda c: c.data == "join_game")
-async def join_game_cb(cb: types.CallbackQuery):
-    group_id = cb.message.chat.id
-    user_id = cb.from_user.id
-    username = cb.from_user.username
-    if not await is_channel_member(user_id):
-        await cb.answer("❌ لطفا ابتدا عضو کانال شوید.", show_alert=True)
-        return
-    active_games[group_id]["participants"].add(user_id)
-    await add_user(user_id, username)
-    await cb.answer("✅ وارد بازی شدی عزیزم!")
-
-@dp.callback_query(lambda c: c.data == "begin_game")
-async def begin_game_cb(cb: types.CallbackQuery):
-    group_id = cb.message.chat.id
-    if cb.from_user.id != active_games[group_id]["creator"]:
-        await cb.answer("❌ فقط سازنده بازی می‌تواند شروع کند.", show_alert=True)
-        return
-    min_val, max_val = active_games[group_id]["range"]
-    await cb.message.edit_text(f"🎉 بازی شروع شد! بازه: {min_val}-{max_val}\nعدد را حدس بزنید.")
-    await cb.answer()
-
-@dp.callback_query(lambda c: c.data == "close_game")
-async def close_game_cb(cb: types.CallbackQuery):
-    group_id = cb.message.chat.id
-    if cb.from_user.id != active_games[group_id]["creator"]:
-        await cb.answer("❌ فقط سازنده بازی می‌تواند ببندد.", show_alert=True)
-        return
-    del active_games[group_id]
-    await cb.message.edit_text("❌ بازی بسته شد.")
-
-# ====================== GUESS HANDLER ======================
-@dp.message(lambda m: m.chat.id in active_games)
-async def guess_number(message: types.Message):
-    group_id = message.chat.id
-    user_id = message.from_user.id
-    if user_id not in active_games[group_id]["participants"]:
-        return
+async def check_channel_membership(user_id: int, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    """Checks if a user is a member of the mandatory channel."""
     try:
-        guess = int(to_english_numbers(message.text))
-    except:
+        member = await context.bot.get_chat_member(chat_id=FORCED_JOIN_CHANNEL, user_id=user_id)
+        return member.status in [ChatMember.MEMBER, ChatMember.ADMINISTRATOR, ChatMember.CREATOR]
+    except Exception as e:
+        logger.warning(f"Could not check channel membership for {user_id}: {e}")
+        return False # Fail-safe
+
+async def force_join_middleware(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    """A middleware to enforce channel subscription. Returns True if check passes."""
+    if update.effective_user:
+        user_id = update.effective_user.id
+        if await is_owner(user_id):
+            return True # Owners bypass the check
+
+        is_member = await check_channel_membership(user_id, context)
+        if not is_member:
+            keyboard = [[InlineKeyboardButton("عضویت در کانال", url=f"https://t.me/{FORCED_JOIN_CHANNEL.lstrip('@')}")]]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            text = f"❗️کاربر گرامی، برای استفاده از ربات ابتدا باید در کانال ما عضو شوید:\n\n{FORCED_JOIN_CHANNEL}\n\nپس از عضویت، دوباره تلاش کنید."
+            if update.callback_query:
+                await update.callback_query.answer(text, show_alert=True)
+            else:
+                await update.message.reply_text(text, reply_markup=reply_markup)
+            return False
+        return True
+    return False
+
+# --- User Commands ---
+
+async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handles the /start command for new users."""
+    user = update.effective_user
+    logger.info(f"User {user.id} ({user.first_name}) started the bot.")
+
+    # --- Database entry ---
+    conn = get_db_connection()
+    if conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO users (user_id, first_name, username) VALUES (%s, %s, %s) ON CONFLICT (user_id) DO NOTHING;",
+                (user.id, user.first_name, user.username)
+            )
+            conn.commit()
+        conn.close()
+
+    # --- Force Join Check ---
+    if not await force_join_middleware(update, context):
         return
-    target = active_games[group_id]["target"]
-    if guess == target:
-        await update_score(user_id, 1)
-        await message.reply(f"🎉 تبریک {message.from_user.mention()}! عدد درست بود.\nامتیاز +1")
-        del active_games[group_id]
-    elif guess < target:
-        await message.reply("🔼 عدد بزرگ‌تر است!")
+
+    # --- Welcome Message ---
+    keyboard = [
+        [InlineKeyboardButton("👤 ارتباط با پشتیبان", url=f"https://t.me/{SUPPORT_USERNAME}")],
+        [InlineKeyboardButton("➕ افزودن ربات به گروه", url=f"https://t.me/{(await context.bot.get_me()).username}?startgroup=true")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    # Fetch custom start message
+    custom_message_info = None
+    conn = get_db_connection()
+    if conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT message_id, chat_id FROM start_message WHERE id = 1;")
+            result = cur.fetchone()
+            if result:
+                custom_message_info = {"message_id": result[0], "chat_id": result[1]}
+        conn.close()
+
+    if custom_message_info:
+        try:
+            await context.bot.copy_message(
+                chat_id=user.id,
+                from_chat_id=custom_message_info["chat_id"],
+                message_id=custom_message_info["message_id"],
+                reply_markup=reply_markup
+            )
+        except Exception as e:
+            logger.error(f"Failed to send custom start message: {e}. Sending default.")
+            await update.message.reply_text("سلام! به ربات ما خوش آمدید.", reply_markup=reply_markup)
     else:
-        await message.reply("🔽 عدد کوچک‌تر است!")
+        await update.message.reply_text("سلام! به ربات ما خوش آمدید.", reply_markup=reply_markup)
 
-# ====================== SHOW TOP SCORES ======================
-@dp.message(Command("top_scores"))
-async def show_top_scores(message: types.Message):
-    rows = await db.fetch("SELECT username, total_score FROM users ORDER BY total_score DESC LIMIT 10")
-    text = "🏆 ۱۰ نفر برتر:\n"
-    for i, row in enumerate(rows, 1):
-        text += f"{i}. @{row['username']} - {row['total_score']} امتیاز\n"
-    await message.reply(text)
 
-# ====================== DAILY & MONTHLY RESET ======================
-async def daily_reset_task():
-    while True:
-        now = datetime.now()
-        next_run = datetime.combine(now.date(), datetime.min.time()) + timedelta(days=1)
-        wait_seconds = (next_run - now).total_seconds()
-        await asyncio.sleep(wait_seconds)
+    # --- Report to Owner ---
+    report_text = (
+        f"✅ کاربر جدید ربات را استارت کرد:\n\n"
+        f"👤 نام: {user.full_name}\n"
+        f"🆔 شناسه: `{user.id}`\n"
+        f"🔗 یوزرنیم: @{user.username if user.username else 'ندارد'}"
+    )
+    # Simple button to send a message, complex implementation deferred
+    for owner_id in OWNER_IDS:
+        try:
+            await context.bot.send_message(chat_id=owner_id, text=report_text, parse_mode="Markdown")
+        except Exception as e:
+            logger.error(f"Failed to send start report to owner {owner_id}: {e}")
 
-        # ریست روزانه
-        await db.execute("UPDATE users SET daily_score = 0")
-        # گزارش روزانه
-        top_users = await db.fetch("SELECT username, daily_score FROM users ORDER BY daily_score DESC LIMIT 10")
-        text = "📊 گزارش روزانه بازی‌ها:\n"
-        if top_users:
-            for i, row in enumerate(top_users, 1):
-                text += f"{i}. @{row['username']} - {row['daily_score']} امتیاز\n"
-        else:
-            text += "هیچ بازی‌ای انجام نشده است.\n"
-        for owner_id in OWNER_IDS:
-            try:
-                await bot.send_message(owner_id, text)
-            except:
-                pass
 
-        # ریست ماهانه اگر روز اول ماه باشد
-        if now.day == 1:
-            top_month = await db.fetchrow("SELECT username, monthly_score FROM users ORDER BY monthly_score DESC LIMIT 1")
-            if top_month:
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Displays the help message with a list of games."""
+    if not await force_join_middleware(update, context):
+        return
+        
+    help_text = """
+    راهنمای ربات بازی 🎮
+
+    در اینجا لیست بازی‌های موجود و دستورات مربوط به آن‌ها آمده است:
+
+    **بازی‌های گروهی:**
+    - `/hokm` - شروع بازی حکم
+    - `/dooz @user` - شروع بازی دوز
+    - `/hads_kalame` - شروع بازی حدس کلمه
+    - `/hads_addad [min] [max]` - شروع بازی حدس عدد
+    - `/type` - شروع بازی تایپ سرعتی
+    - `/gharch` - شروع بازی قارچ (پیام ناشناس)
+    - `/eteraf` - شروع بازی اعتراف (ناشناс)
+
+    **قابلیت‌های دیگر:**
+    - `/help` - نمایش همین راهنما
+    - `/settings` - تنظیمات ربات در گروه (برای ادمین‌ها)
+
+    برای شروع هر بازی، کافیست دستور آن را در گروه ارسال کنید.
+    """
+    await update.message.reply_text(help_text, parse_mode="Markdown")
+
+
+# --- Game Stubs (To be fully implemented) ---
+# These are placeholders to show where the game logic would go.
+
+async def game_placeholder(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """A placeholder for game commands that are not yet implemented."""
+    if not await force_join_middleware(update, context):
+        return
+        
+    command = update.message.text.split()[0]
+    await update.message.reply_text(
+        f"بازی `{command}` در حال حاضر در دست ساخت است. به زودی آماده خواهد شد!",
+        parse_mode="Markdown"
+    )
+
+# --- Owner Commands ---
+
+async def set_start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Sets the custom welcome message for the bot."""
+    user_id = update.effective_user.id
+    if not await is_owner(user_id):
+        return await update.message.reply_text("❌ این دستور فقط برای مالک ربات است.")
+
+    if not update.message.reply_to_message:
+        return await update.message.reply_text("لطفا این دستور را روی یک پیام ریپلای کنید.")
+
+    replied_message = update.message.reply_to_message
+    conn = get_db_connection()
+    if conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO start_message (id, message_id, chat_id) VALUES (1, %s, %s) "
+                "ON CONFLICT (id) DO UPDATE SET message_id = EXCLUDED.message_id, chat_id = EXCLUDED.chat_id;",
+                (replied_message.message_id, replied_message.chat_id)
+            )
+            conn.commit()
+        conn.close()
+        await update.message.reply_text("✅ پیام خوشامدگویی با موفقیت تنظیم شد.")
+    else:
+        await update.message.reply_text("⚠️ خطای دیتابیس. لطفا دوباره تلاش کنید.")
+
+async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Sends bot statistics to the owner."""
+    user_id = update.effective_user.id
+    if not await is_owner(user_id):
+        return
+
+    conn = get_db_connection()
+    if conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT COUNT(*) FROM users;")
+            user_count = cur.fetchone()[0]
+            cur.execute("SELECT COUNT(*) FROM groups;")
+            group_count = cur.fetchone()[0]
+            cur.execute("SELECT SUM(member_count) FROM groups;")
+            total_members_result = cur.fetchone()
+            total_group_members = total_members_result[0] if total_members_result[0] else 0
+
+        stats_text = (
+            f"📊 **آمار ربات** 📊\n\n"
+            f"👤 **تعداد کاربران:** {user_count}\n"
+            f"👥 **تعداد گروه‌ها:** {group_count}\n"
+            f"👨‍👩‍👧‍👦 **مجموع اعضای گروه‌ها:** {total_group_members}"
+        )
+        await update.message.reply_text(stats_text, parse_mode="Markdown")
+        conn.close()
+    else:
+        await update.message.reply_text("⚠️ خطای دیتابیس.")
+
+async def leave_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Makes the bot leave a group by its ID."""
+    user_id = update.effective_user.id
+    if not await is_owner(user_id):
+        return
+        
+    if not context.args:
+        return await update.message.reply_text("استفاده صحیح: `/leave <group_id>`")
+    
+    try:
+        group_id = int(context.args[0])
+        await context.bot.leave_chat(group_id)
+        await update.message.reply_text(f"✅ با موفقیت از گروه `{group_id}` خارج شدم.")
+        # Also remove from DB
+        conn = get_db_connection()
+        if conn:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM groups WHERE group_id = %s;", (group_id,))
+                conn.commit()
+            conn.close()
+    except (ValueError, IndexError):
+        await update.message.reply_text("لطفا یک آیدی عددی معتبر وارد کنید.")
+    except Exception as e:
+        await update.message.reply_text(f"خطا در خروج از گروه: {e}")
+
+async def grouplist_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if not await is_owner(user_id):
+        return
+        
+    conn = get_db_connection()
+    if conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT group_id, title, member_count, owner_mention FROM groups;")
+            groups = cur.fetchall()
+        conn.close()
+        
+        if not groups:
+            return await update.message.reply_text("ربات در هیچ گروهی عضو نیست.")
+            
+        message = "📜 **لیست گروه‌ها:**\n\n"
+        for i, group in enumerate(groups, 1):
+            group_id, title, member_count, owner_mention = group
+            message += (
+                f"{i}. **{title}**\n"
+                f"   - آیدی: `{group_id}`\n"
+                f"   - اعضا: {member_count}\n"
+                f"   - مالک: {owner_mention if owner_mention else 'نامشخص'}\n\n"
+            )
+            # Send in chunks to avoid message length limit
+            if len(message) > 3500:
+                await update.message.reply_text(message, parse_mode="Markdown")
+                message = ""
+        
+        if message:
+            await update.message.reply_text(message, parse_mode="Markdown")
+
+    else:
+        await update.message.reply_text("⚠️ خطای دیتابیس.")
+
+async def broadcast_command(update: Update, context: ContextTypes.DEFAULT_TYPE, target: str):
+    """Generic broadcast function."""
+    user_id = update.effective_user.id
+    if not await is_owner(user_id):
+        return await update.message.reply_text("❌ این دستور فقط برای مالک ربات است.")
+    
+    if not update.message.reply_to_message:
+        return await update.message.reply_text("لطفا این دستور را روی یک پیام ریپلای کنید.")
+
+    conn = get_db_connection()
+    if not conn:
+        return await update.message.reply_text("⚠️ خطای دیتابیس.")
+
+    table = "users" if target == "users" else "groups"
+    column = "user_id" if target == "users" else "group_id"
+    
+    with conn.cursor() as cur:
+        cur.execute(f"SELECT {column} FROM {table};")
+        targets = cur.fetchall()
+    conn.close()
+
+    if not targets:
+        return await update.message.reply_text(f"هیچ هدفی برای ارسال یافت نشد.")
+
+    sent_count = 0
+    failed_count = 0
+    
+    status_message = await update.message.reply_text(f"⏳ در حال شروع ارسال همگانی به {len(targets)} {target}...")
+
+    for (target_id,) in targets:
+        try:
+            await context.bot.forward_message(
+                chat_id=target_id,
+                from_chat_id=update.message.reply_to_message.chat.id,
+                message_id=update.message.reply_to_message.message_id
+            )
+            sent_count += 1
+        except Exception as e:
+            failed_count += 1
+            logger.error(f"Broadcast failed for {target_id}: {e}")
+        
+        if (sent_count + failed_count) % 20 == 0: # Update status periodically
+            await status_message.edit_text(
+                f"⏳ در حال ارسال...\n✅ موفق: {sent_count}\n❌ ناموفق: {failed_count}"
+            )
+
+    await status_message.edit_text(
+        f"🏁 ارسال همگانی به پایان رسید.\n\n"
+        f"✅ موفق: {sent_count}\n"
+        f"❌ ناموفق: {failed_count}"
+    )
+
+async def fwdusers_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await broadcast_command(update, context, target="users")
+
+async def fwdgroups_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await broadcast_command(update, context, target="groups")
+
+# --- Chat Member Handler ---
+
+async def track_chats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Tracks when the bot is added to or removed from a group."""
+    result = update.chat_member
+    if result is None:
+        return
+
+    chat = result.chat
+    user = result.from_user
+    new_status = result.new_chat_member.status
+    old_status = result.old_chat_member.status
+    
+    is_bot = result.new_chat_member.user.id == context.bot.id
+
+    if is_bot:
+        if new_status == ChatMember.MEMBER and old_status != ChatMember.MEMBER:
+            # Bot was added to the group
+            logger.info(f"Bot was added to group {chat.id} by {user.id}")
+
+            # Check group limit
+            conn = get_db_connection()
+            if not conn:
+                await context.bot.send_message(chat.id, "خطای دیتابیس، لطفا بعدا امتحان کنید.")
+                await context.bot.leave_chat(chat.id)
+                return
+
+            with conn.cursor() as cur:
+                cur.execute("SELECT COUNT(*) FROM groups;")
+                group_count = cur.fetchone()[0]
+            
+            if group_count >= GROUP_INSTALL_LIMIT:
+                limit_message = (
+                    f"⚠️ **ظرفیت نصب این ربات تکمیل شده است!** ⚠️\n\n"
+                    f"متاسفانه در حال حاضر امکان فعال‌سازی ربات در گروه‌های جدید وجود ندارد. "
+                    f"برای دریافت نسخه ۲ و اطلاعات بیشتر، لطفاً با پشتیبانی (@{SUPPORT_USERNAME}) در ارتباط باشید."
+                )
+                await context.bot.send_message(chat.id, limit_message, parse_mode="Markdown")
+                await context.bot.leave_chat(chat.id)
+
+                # Notify owner
+                owner_report = (
+                     f"🔔 **هشدار: سقف نصب ({GROUP_INSTALL_LIMIT} گروه) تکمیل شد!** 🔔\n\n"
+                     f"ربات تلاش کرد به گروه جدید `{chat.title}` (ID: `{chat.id}`) اضافه شود اما به دلیل تکمیل ظرفیت، به صورت خودکار خارج شد."
+                )
                 for owner_id in OWNER_IDS:
-                    await bot.send_message(owner_id, f"🏆 کاربر برتر ماه قبل: @{top_month['username']} - {top_month['monthly_score']} امتیاز")
-            await db.execute("UPDATE users SET monthly_score = 0")
+                    await context.bot.send_message(owner_id, owner_report, parse_mode="Markdown")
+                conn.close()
+                return
 
-# ====================== STARTUP ======================
-async def main():
-    await db.connect()
-    await init_tables()
-    asyncio.create_task(daily_reset_task())
-    await dp.start_polling(bot)
+            # Add group to DB
+            try:
+                member_count = await context.bot.get_chat_member_count(chat.id)
+                owner = (await context.bot.get_chat_administrators(chat.id))[0].user
+                owner_mention = owner.mention_markdown()
+            except Exception:
+                member_count = 0
+                owner_mention = "نامشخص"
+
+            with conn.cursor() as cur:
+                cur.execute(
+                    "INSERT INTO groups (group_id, title, member_count, owner_mention) VALUES (%s, %s, %s, %s) ON CONFLICT (group_id) DO UPDATE SET title = EXCLUDED.title, member_count = EXCLUDED.member_count;",
+                    (chat.id, chat.title, member_count, owner_mention)
+                )
+                conn.commit()
+            conn.close()
+
+            # Send welcome message and report to owner
+            welcome_text = "سلام! 👋 من با موفقیت در گروه شما نصب شدم.\nبرای مشاهده لیست بازی‌ها از دستور /help استفاده کنید."
+            await context.bot.send_message(chat.id, welcome_text)
+
+            report_text = (
+                f"➕ **ربات به گروه جدید اضافه شد:**\n\n"
+                f"🌐 نام گروه: {chat.title}\n"
+                f"🆔 آیدی گروه: `{chat.id}`\n"
+                f"👥 تعداد اعضا: {member_count}\n\n"
+                f"👤 **اضافه شده توسط:**\n"
+                f"   - نام: {user.full_name}\n"
+                f"   - یوزرنیم: @{user.username if user.username else 'ندارد'}\n"
+                f"   - آیدی: `{user.id}`"
+            )
+            for owner_id in OWNER_IDS:
+                await context.bot.send_message(owner_id, report_text, parse_mode="Markdown")
+
+        elif new_status == ChatMember.LEFT:
+            # Bot was removed from the group
+            logger.info(f"Bot was removed from group {chat.id}")
+            
+            # Remove from DB
+            conn = get_db_connection()
+            if conn:
+                with conn.cursor() as cur:
+                    cur.execute("DELETE FROM groups WHERE group_id = %s;", (chat.id,))
+                    conn.commit()
+                conn.close()
+
+            # Report to owner
+            report_text = (
+                f"❌ **ربات از گروه زیر اخراج شد:**\n\n"
+                f"🌐 نام گروه: {chat.title}\n"
+                f"🆔 آیدی گروه: `{chat.id}`"
+            )
+            for owner_id in OWNER_IDS:
+                await context.bot.send_message(owner_id, report_text, parse_mode="Markdown")
+
+# --- Main Application ---
+def main() -> None:
+    """Start the bot."""
+    # Run DB setup once at the start
+    setup_database()
+
+    # Create the Application and pass it your bot's token.
+    BOT_TOKEN = os.environ.get("BOT_TOKEN")
+    if not BOT_TOKEN:
+        logger.critical("BOT_TOKEN environment variable not set. Exiting.")
+        return
+
+    application = Application.builder().token(BOT_TOKEN).build()
+
+    # --- Register Handlers ---
+    # User commands
+    application.add_handler(CommandHandler("start", start_command))
+    application.add_handler(CommandHandler("help", help_command))
+
+    # Game command placeholders
+    game_commands = ["hokm", "dooz", "hads_kalame", "hads_addad", "type", "gharch", "eteraf", "settings", "top"]
+    for cmd in game_commands:
+        application.add_handler(CommandHandler(cmd, game_placeholder))
+
+    # Owner commands
+    application.add_handler(CommandHandler("setstart", set_start_command))
+    application.add_handler(CommandHandler("stats", stats_command))
+    application.add_handler(CommandHandler("leave", leave_command))
+    application.add_handler(CommandHandler("grouplist", grouplist_command))
+    application.add_handler(CommandHandler("fwdusers", fwdusers_command))
+    application.add_handler(CommandHandler("fwdgroups", fwdgroups_command))
+
+    # Chat member handler for tracking groups
+    application.add_handler(ChatMemberHandler(track_chats, ChatMemberHandler.MY_CHAT_MEMBER))
+
+    # Run the bot until the user presses Ctrl-C
+    logger.info("Bot is starting...")
+    application.run_polling()
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
