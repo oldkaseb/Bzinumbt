@@ -6,7 +6,7 @@ from aiogram.filters import Command
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardmarkup
 from datetime import datetime, timedelta
 import re
 
@@ -116,10 +116,12 @@ async def init_tables():
 # ====================== PRIVATE HANDLERS ======================
 @dp.message(Command("start"))
 async def start_cmd(message: types.Message):
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton("➕ افزودن به گروه", url=f"https://t.me/FindNumRS_Bot?startgroup=true")],
-        [InlineKeyboardButton("🆘 تماس با پشتیبان", url=f"https://t.me/{SUPPORT[1:]}")]
-    ])
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardmarkup(text="➕ افزودن به گروه", url="https://t.me/FindNumRS_Bot?startgroup=true")],
+            [InlineKeyboardmarkup(text="🆘 تماس با پشتیبان", url=f"https://t.me/{SUPPORT[1:]}")]
+        ]
+    )
     await message.answer(
         f"سلام 😎\nمن ربات FindNumRS_Bot هستم!\nبا من می‌تونی در گروه‌ها عدد حدس بزنی و امتیاز جمع کنی.\n"
         "برای کاربر برتر ماهانه هدیه داریم 🎁\n\n"
@@ -139,10 +141,10 @@ RANGES = [
 def range_panel():
     kb = InlineKeyboardMarkup(row_width=2)
     for r in RANGES:
-        kb.insert(InlineKeyboardButton(f"{r[0]}-{r[1]}", callback_data=f"range_{r[0]}_{r[1]}"))
+        kb.insert(InlineKeyboardmarkup(f"{r[0]}-{r[1]}", callback_data=f"range_{r[0]}_{r[1]}"))
     kb.add(
-        InlineKeyboardButton("🎯 رنج سفارشی", callback_data="custom_range"),
-        InlineKeyboardButton("❌ بستن", callback_data="close_panel")
+        InlineKeyboardmarkup("🎯 رنج سفارشی", callback_data="custom_range"),
+        InlineKeyboardmarkup("❌ بستن", callback_data="close_panel")
     )
     return kb
 
@@ -165,9 +167,9 @@ async def range_selected(cb: types.CallbackQuery):
     await db.execute("INSERT INTO games(group_id, creator_id, target_number, start_time) VALUES($1,$2,$3,$4)",
                      group_id, cb.from_user.id, target, datetime.now())
     kb = InlineKeyboardMarkup(row_width=2)
-    kb.add(InlineKeyboardButton("🎮 منم بازی", callback_data="join_game"))
-    kb.add(InlineKeyboardButton("▶️ شروع بازی", callback_data="begin_game"))
-    kb.add(InlineKeyboardButton("❌ بستن", callback_data="close_game"))
+    kb.add(InlineKeyboardmarkup("🎮 منم بازی", callback_data="join_game"))
+    kb.add(InlineKeyboardmarkup("▶️ شروع بازی", callback_data="begin_game"))
+    kb.add(InlineKeyboardmarkup("❌ بستن", callback_data="close_game"))
     await cb.message.edit_text(f"🎉 بازی آماده شد! بازه: {min_val}-{max_val}\nشرکت‌کنندگان وارد شوند:", reply_markup=kb)
     await cb.answer()
 
@@ -193,9 +195,9 @@ async def custom_range_input(message: types.Message, state: FSMContext):
     await db.execute("INSERT INTO games(group_id, creator_id, target_number, start_time) VALUES($1,$2,$3,$4)",
                      group_id, data["creator"], target, datetime.now())
     kb = InlineKeyboardMarkup(row_width=2)
-    kb.add(InlineKeyboardButton("🎮 منم بازی", callback_data="join_game"))
-    kb.add(InlineKeyboardButton("▶️ شروع بازی", callback_data="begin_game"))
-    kb.add(InlineKeyboardButton("❌ بستن", callback_data="close_game"))
+    kb.add(InlineKeyboardmarkup("🎮 منم بازی", callback_data="join_game"))
+    kb.add(InlineKeyboardmarkup("▶️ شروع بازی", callback_data="begin_game"))
+    kb.add(InlineKeyboardmarkup("❌ بستن", callback_data="close_game"))
     await message.reply(f"🎉 بازی آماده شد! بازه: {min_val}-{max_val}", reply_markup=kb)
     await state.clear()
 
