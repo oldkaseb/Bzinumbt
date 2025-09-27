@@ -1,285 +1,234 @@
 import asyncio
-import os
-import re
-import random
-from datetime import datetime, timedelta
-from aiogram import Bot, Dispatcher, F
-from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 import asyncpg
+from aiogram import Bot, Dispatcher, types
+from aiogram.filters import Command
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.fsm.state import State, StatesGroup
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.storage.memory import MemoryStorage
+from datetime import datetime, timedelta
+import re
+import os
 
-# ===== تنظیمات محیط =====
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-DATABASE_URL = os.getenv("DATABASE_URL")
+# ====================== CONFIG ======================
+API_TOKEN = os.getenv("BOT_TOKEN")  # متغیر محیطی ریلوی برای توکن ربات
+DB_URI = os.getenv("DATABASE_URL")   # متغیر محیطی ریلوی برای دیتابیس PostgreSQL
+CHANNEL_ID = "@RHINOSOUL_TM"
+SUPPORT = "@OLDKASEB"
 OWNER_IDS = [7662192190, 6041119040]
-REQUIRED_CHANNEL = "@RHINOSOUL_TM"
-SUPPORT_USERNAME = "@OLDKASEB"
-BOT_USERNAME = "@FindNumRS_Bot"
 
-if not BOT_TOKEN or not DATABASE_URL:
-    raise RuntimeError("BOT_TOKEN و DATABASE_URL باید تنظیم شوند.")
+# ====================== DATABASE ======================
+class Database:
+    def __init__(self):
+        self.pool = None
 
-bot = Bot(token=BOT_TOKEN, parse_mode="HTML")
-dp = Dispatcher()
-pool: asyncpg.Pool = None
+    async def connect(self):
+        self.pool = await asyncpg.create_pool(dsn=DB_URI)
 
-# ===== دیتابیس =====
-CREATE_SQL = """
-CREATE TABLE IF NOT EXISTS users (
-    id BIGINT PRIMARY KEY,
-    username TEXT,
-    first_name TEXT,
-    score INT DEFAULT 0,
-    daily_score INT DEFAULT 0
-);
+    async def execute(self, query, *args):
+        async with self.pool.acquire() as conn:
+            return await conn.execute(query, *args)
 
-CREATE TABLE IF NOT EXISTS groups (
-    id BIGINT PRIMARY KEY,
-    title TEXT,
-    owner_id BIGINT
-);
+    async def fetch(self, query, *args):
+        async with self.pool.acquire() as conn:
+            return await conn.fetch(query, *args)
 
-CREATE TABLE IF NOT EXISTS games (
-    id SERIAL PRIMARY KEY,
-    group_id BIGINT REFERENCES groups(id) ON DELETE CASCADE,
-    creator_id BIGINT,
-    range_min INT,
-    range_max INT,
-    target_number INT,
-    status TEXT CHECK (status IN ('waiting', 'active', 'finished')) DEFAULT 'waiting',
-    announce_msg_id INT,
-    started_at TIMESTAMPTZ,
-    finished_at TIMESTAMPTZ,
-    winner_id BIGINT
-);
+    async def fetchrow(self, query, *args):
+        async with self.pool.acquire() as conn:
+            return await conn.fetchrow(query, *args)
 
-CREATE TABLE IF NOT EXISTS participants (
-    game_id INT,
-    user_id BIGINT,
-    PRIMARY KEY (game_id, user_id)
-);
-"""
+db = Database()
 
-async def init_db():
-    global pool
-    pool = await asyncpg.create_pool(DATABASE_URL, min_size=1, max_size=5)
-    async with pool.acquire() as conn:
-        await conn.execute(CREATE_SQL)
+# ====================== FSM ======================
+class GuessGame(StatesGroup):
+    waiting_for_range = State()
+    playing = State()
 
-# ===== کمک‌تابع‌ها =====
-def normalize_numbers(text: str) -> str:
-    return text.translate(str.maketrans("۰۱۲۳۴۵۶۷۸۹", "0123456789"))
+# ====================== BOT INIT ======================
+bot = Bot(token=API_TOKEN)
+storage = MemoryStorage()
+dp = Dispatcher(storage=storage)
 
-async def upsert_user(u):
-    async with pool.acquire() as conn:
-        await conn.execute("""
-            INSERT INTO users (id, username, first_name)
-            VALUES ($1, $2, $3)
-            ON CONFLICT (id) DO UPDATE
-            SET username=EXCLUDED.username, first_name=EXCLUDED.first_name
-        """, u.id, u.username, u.first_name or "")
+# ====================== HELPERS ======================
+def to_english_numbers(text: str) -> str:
+    persian_numbers = "۰۱۲۳۴۵۶۷۸۹"
+    english_numbers = "0123456789"
+    for p, e in zip(persian_numbers, english_numbers):
+        text = text.replace(p, e)
+    return text
 
-async def ensure_group(chat_id: int, title: str, owner_id: int):
-    async with pool.acquire() as conn:
-        await conn.execute("""
-            INSERT INTO groups (id, title, owner_id)
-            VALUES ($1,$2,$3)
-            ON CONFLICT (id) DO UPDATE SET title=EXCLUDED.title
-        """, chat_id, title or "", owner_id)
-
-async def is_member_required_channel(user_id: int) -> bool:
+async def is_channel_member(user_id: int):
     try:
-        member = await bot.get_chat_member(REQUIRED_CHANNEL, user_id)
-        return member.status in ("member", "administrator", "creator")
+        member = await bot.get_chat_member(chat_id=CHANNEL_ID, user_id=user_id)
+        return member.status != "left"
     except:
         return False
 
-async def send_join_request(message: Message | CallbackQuery):
-    msg = message.message if isinstance(message, CallbackQuery) else message
+async def get_admin_ids(chat_id: int):
+    admins = await bot.get_chat_administrators(chat_id)
+    return [admin.user.id for admin in admins]
+
+async def add_user(user_id: int, username: str):
+    await db.execute("""
+        INSERT INTO users(user_id, username)
+        VALUES($1, $2)
+        ON CONFLICT (user_id) DO UPDATE SET username=$2
+    """, user_id, username or "")
+
+async def update_score(user_id: int, score: int):
+    await db.execute("""
+        UPDATE users
+        SET total_score = total_score + $1,
+            daily_score = daily_score + $1,
+            monthly_score = monthly_score + $1
+        WHERE user_id = $2
+    """, score, user_id)
+
+# ====================== TABLE INIT ======================
+async def init_tables():
+    await db.execute("""
+    CREATE TABLE IF NOT EXISTS users (
+        user_id BIGINT PRIMARY KEY,
+        username TEXT,
+        total_score INT DEFAULT 0,
+        daily_score INT DEFAULT 0,
+        monthly_score INT DEFAULT 0
+    );
+    """)
+    await db.execute("""
+    CREATE TABLE IF NOT EXISTS games (
+        game_id SERIAL PRIMARY KEY,
+        group_id BIGINT,
+        creator_id BIGINT,
+        target_number INT,
+        start_time TIMESTAMP,
+        end_time TIMESTAMP
+    );
+    """)
+    await db.execute("""
+    CREATE TABLE IF NOT EXISTS participants (
+        game_id INT REFERENCES games(game_id),
+        user_id BIGINT REFERENCES users(user_id),
+        score INT DEFAULT 0,
+        PRIMARY KEY(game_id,user_id)
+    );
+    """)
+
+# ====================== PRIVATE HANDLERS ======================
+@dp.message(Command("start"))
+async def start_cmd(message: types.Message):
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton("📢 عضویت در کانال", url=f"https://t.me/{REQUIRED_CHANNEL.removeprefix('@')}")],
-        [InlineKeyboardButton("✅ عضو شدم", callback_data="check_membership")]
+        [InlineKeyboardButton("➕ افزودن به گروه", url=f"https://t.me/FindNumRS_Bot?startgroup=true")],
+        [InlineKeyboardButton("🆘 تماس با پشتیبان", url=f"https://t.me/{SUPPORT[1:]}")]
     ])
-    await msg.reply(f"برای شرکت در بازی ابتدا عضو کانال {REQUIRED_CHANNEL} شوید.", reply_markup=kb)
-
-# ===== کیبوردها =====
-def waiting_kb(game_id: int):
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton("🎮 منم بازی", callback_data=f"join_{game_id}")],
-        [InlineKeyboardButton("▶️ شروع بازی", callback_data=f"start_{game_id}")],
-        [InlineKeyboardButton("❌ بستن", callback_data=f"close_{game_id}")]
-    ])
-
-# ===== مدیریت پیام‌های قبلی =====
-last_bot_messages = {}  # chat_id -> message_id
-
-async def delete_last_bot_message(chat_id: int):
-    msg_id = last_bot_messages.get(chat_id)
-    if msg_id:
-        try:
-            await bot.delete_message(chat_id, msg_id)
-        except:
-            pass
-
-# ===== استارت PV =====
-@dp.message(F.chat.type == "private", F.text.lower() == "start")
-async def start_pv(m: Message):
-    await upsert_user(m.from_user)
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton("➕ افزودن به گروه", url=f"https://t.me/{BOT_USERNAME.removeprefix('@')}?startgroup=true")],
-        [InlineKeyboardButton("🆘 تماس با پشتیبان", url=f"https://t.me/{SUPPORT_USERNAME.removeprefix('@')}")],
-    ])
-    text = f"""👋 سلام {m.from_user.first_name}!
-
-🎲 ربات «حدس عدد» هدیه‌ای از تیم RHINOSOUL است!
-
-💡 با نوشتن «حدس عدد» در گروه، بازی را شروع کنید.
-🎁 هر ماه تیم ما به کاربر امتیاز برتر هدیه می‌دهد!
-
-تیم برنامه‌نویسی RHINOSOUL
-توسعه ربات، سایت و اپلیکیشن برای هر گروه و کسب‌وکار
-
-📢 کانال تیم: {REQUIRED_CHANNEL}
-🆘 پشتیبان: {SUPPORT_USERNAME}
-"""
-    await m.answer(text, reply_markup=kb)
-
-# ===== دکمه‌ها =====
-@dp.callback_query(F.data == "check_membership")
-async def check_membership(c: CallbackQuery):
-    if await is_member_required_channel(c.from_user.id):
-        await c.answer("عضویت تایید شد ✅", show_alert=True)
-    else:
-        await c.answer("هنوز عضو کانال نیستی ❌", show_alert=True)
-
-@dp.callback_query(F.data.startswith("close_"))
-async def close_panel(c: CallbackQuery):
-    try:
-        await bot.delete_message(c.message.chat.id, c.message.message_id)
-    except:
-        pass
-
-# ===== شروع بازی =====
-@dp.message(F.chat.type.in_({"group","supergroup"}), F.text.lower().contains("حدس عدد"))
-async def handle_guess_word(m: Message):
-    await upsert_user(m.from_user)
-    await ensure_group(m.chat.id, m.chat.title or "", m.from_user.id)
-    if not await is_member_required_channel(m.from_user.id):
-        await send_join_request(m)
-        return
-    await delete_last_bot_message(m.chat.id)
-    msg = await m.reply("🎯 لطفاً رنج بازی را وارد کنید (مثال: 1-1000 یا ۱-۱۰۰۰):")
-    last_bot_messages[m.chat.id] = msg.message_id
-
-    @dp.message(F.chat.id == m.chat.id)
-    async def set_range(r_msg: Message):
-        text = normalize_numbers(r_msg.text)
-        match = re.match(r"(\d+)[–-](\d+)", text)
-        if not match:
-            await r_msg.reply("❌ فرمت اشتباه است، دوباره وارد کنید (مثال: 1-1000).")
-            return
-        mn, mx = int(match[1]), int(match[2])
-        async with pool.acquire() as conn:
-            await conn.execute("""
-                INSERT INTO games (group_id, creator_id, range_min, range_max, status)
-                VALUES ($1,$2,$3,$4,'waiting')
-            """, m.chat.id, m.from_user.id, mn, mx)
-            rec = await conn.fetchrow("SELECT id FROM games WHERE group_id=$1 AND status='waiting' ORDER BY id DESC LIMIT 1", m.chat.id)
-            game_id = rec["id"]
-        await bot.edit_message_text(
-            chat_id=r_msg.chat.id,
-            message_id=last_bot_messages[m.chat.id],
-            text=f"🎯 بازی در حالت انتظار!\n<b>رنج بازی:</b> {mn} تا {mx}\nبرای شرکت حتماً عضو {REQUIRED_CHANNEL} شوید.",
-            reply_markup=waiting_kb(game_id),
-            parse_mode="HTML"
-        )
-        dp.message_handlers.unregister(set_range)
-
-# ===== شرکت در بازی =====
-@dp.callback_query(F.data.startswith("join_"))
-async def join_game(c: CallbackQuery):
-    game_id = int(c.data.split("_")[1])
-    if not await is_member_required_channel(c.from_user.id):
-        await c.answer("برای شرکت باید عضو کانال باشی ❌", show_alert=True)
-        return
-    await upsert_user(c.from_user)
-    async with pool.acquire() as conn:
-        await conn.execute("""
-            INSERT INTO participants (game_id, user_id)
-            VALUES ($1,$2)
-            ON CONFLICT DO NOTHING
-        """, game_id, c.from_user.id)
-    await c.answer("🎉 وارد بازی شدی عزیزم ✅", show_alert=True)
-
-# ===== شروع بازی توسط درخواست‌کننده =====
-@dp.callback_query(F.data.startswith("start_"))
-async def start_game_btn(c: CallbackQuery):
-    game_id = int(c.data.split("_")[1])
-    async with pool.acquire() as conn:
-        game = await conn.fetchrow("SELECT * FROM games WHERE id=$1", game_id)
-    if not game or game["status"] != "waiting":
-        await c.answer("بازی نامعتبر است ❌", show_alert=True)
-        return
-    if c.from_user.id != game["creator_id"]:
-        await c.answer("فقط درخواست‌کننده می‌تواند بازی را شروع کند ❌", show_alert=True)
-        return
-    target = random.randint(game["range_min"], game["range_max"])
-    async with pool.acquire() as conn:
-        await conn.execute("""
-            UPDATE games SET target_number=$1, status='active', started_at=now()
-            WHERE id=$2
-        """, target, game_id)
-    await c.message.edit_text(
-        f"🎯 بازی شروع شد!\nعدد بین {game['range_min']} تا {game['range_max']} حدس بزنید!",
-        reply_markup=None
+    await message.answer(
+        f"سلام 😎\nمن ربات FindNumRS_Bot هستم!\nبا من می‌تونی در گروه‌ها عدد حدس بزنی و امتیاز جمع کنی.\n"
+        "برای کاربر برتر ماهانه هدیه داریم 🎁\n\n"
+        f"کانال تیم: {CHANNEL_ID}\n"
+        f"پشتیبان: {SUPPORT}",
+        reply_markup=kb
     )
-    await c.answer("بازی شروع شد ✅")
 
-# ===== حدس عدد =====
-@dp.message(F.chat.type.in_({"group","supergroup"}), F.text.regexp(r"^[۰-۹0-9]+$"))
-async def guess_number(m: Message):
-    num = int(normalize_numbers(m.text.strip()))
-    async with pool.acquire() as conn:
-        game = await conn.fetchrow("SELECT * FROM games WHERE group_id=$1 AND status='active' ORDER BY id DESC LIMIT 1", m.chat.id)
-        if not game:
-            return
-        is_participant = await conn.fetchval("SELECT 1 FROM participants WHERE game_id=$1 AND user_id=$2", game["id"], m.from_user.id)
-        if not is_participant:
-            return
-        if num == game["target_number"]:
-            await conn.execute("""
-                UPDATE games SET status='finished', winner_id=$1, finished_at=now()
-                WHERE id=$2
-            """, m.from_user.id, game["id"])
-            await conn.execute("UPDATE users SET score = score + 1, daily_score = daily_score + 1 WHERE id=$1", m.from_user.id)
-            await m.reply(f"🎉 تبریک! <a href='tg://user?id={m.from_user.id}'>{m.from_user.first_name}</a> عدد {num} را درست حدس زد!", parse_mode="HTML")
+# ====================== GROUP GAME ======================
+active_games = {}  # {group_id: {"creator": id, "target": num, "participants": set()}}
 
-# ===== نمایش امتیاز =====
-@dp.message(F.chat.type.in_({"group","supergroup"}), F.text.lower() == "امتیاز بازی")
-async def show_scores(m: Message):
-    async with pool.acquire() as conn:
-        rows = await conn.fetch("""
-            SELECT u.id, u.first_name, u.score
-            FROM users u
-            JOIN participants p ON u.id = p.user_id
-            JOIN games g ON g.id = p.game_id
-            WHERE g.group_id=$1
-            GROUP BY u.id
-            ORDER BY u.score DESC
-            LIMIT 10
-        """, m.chat.id)
-    if not rows:
-        await m.reply("هنوز هیچ امتیازی ثبت نشده.")
+@dp.message(lambda m: m.text and m.text.startswith("حدس عدد"))
+async def start_guess_game(message: types.Message, state: FSMContext):
+    admins = await get_admin_ids(message.chat.id)
+    if message.from_user.id not in admins:
+        await message.reply("❌ فقط ادمین‌ها می‌توانند بازی را شروع کنند.")
         return
-    lines = ["🏆 <b>جدول امتیازات</b>:"]
-    for idx, row in enumerate(rows,1):
-        lines.append(f"{idx}. <a href='tg://user?id={row['id']}'>{row['first_name']}</a> — {row['score']} امتیاز")
-    await m.reply("\n".join(lines), parse_mode="HTML")
+    await message.reply("🎮 لطفا بازه بازی را به صورت min-max وارد کنید (مثلا 1-1000):")
+    await state.set_state(GuessGame.waiting_for_range)
+    await state.update_data(creator=message.from_user.id)
 
-# ===== اجرای ربات =====
+@dp.message(GuessGame.waiting_for_range)
+async def set_game_range(message: types.Message, state: FSMContext):
+    text = to_english_numbers(message.text)
+    match = re.match(r"(\d+)-(\d+)", text)
+    if not match:
+        await message.reply("❌ فرمت اشتباه است. لطفا به صورت min-max وارد کنید.")
+        return
+    min_val, max_val = int(match.group(1)), int(match.group(2))
+    target = int(min_val + (max_val - min_val) * asyncio.random.random())
+    data = await state.get_data()
+    group_id = message.chat.id
+    active_games[group_id] = {"creator": data["creator"], "target": target, "participants": set(), "range": (min_val, max_val)}
+    await db.execute("INSERT INTO games(group_id, creator_id, target_number, start_time) VALUES($1,$2,$3,$4)",
+                     group_id, data["creator"], target, datetime.now())
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton("🎮 منم بازی", callback_data="join_game")],
+        [InlineKeyboardButton("▶️ شروع بازی", callback_data="begin_game")],
+        [InlineKeyboardButton("❌ بستن", callback_data="close_game")]
+    ])
+    await message.reply(f"بازی آماده شد! بازه: {min_val} تا {max_val}\nشرکت‌کنندگان باید عضو {CHANNEL_ID} باشند.", reply_markup=kb)
+    await state.clear()
+
+# ====================== CALLBACK HANDLERS ======================
+@dp.callback_query(lambda c: c.data == "join_game")
+async def join_game_cb(callback: types.CallbackQuery):
+    group_id = callback.message.chat.id
+    user_id = callback.from_user.id
+    username = callback.from_user.username
+    if not await is_channel_member(user_id):
+        await callback.answer("❌ لطفا ابتدا عضو کانال شوید.", show_alert=True)
+        return
+    active_games[group_id]["participants"].add(user_id)
+    await add_user(user_id, username)
+    await callback.answer("✅ وارد بازی شدی عزیزم!")
+
+@dp.callback_query(lambda c: c.data == "begin_game")
+async def begin_game_cb(callback: types.CallbackQuery):
+    group_id = callback.message.chat.id
+    if callback.from_user.id != active_games[group_id]["creator"]:
+        await callback.answer("❌ فقط سازنده بازی می‌تواند شروع کند.", show_alert=True)
+        return
+    min_val, max_val = active_games[group_id]["range"]
+    await callback.message.edit_text(f"🎉 بازی شروع شد! بازه: {min_val}-{max_val}\nعدد را حدس بزنید.")
+
+@dp.callback_query(lambda c: c.data == "close_game")
+async def close_game_cb(callback: types.CallbackQuery):
+    group_id = callback.message.chat.id
+    if callback.from_user.id != active_games[group_id]["creator"]:
+        await callback.answer("❌ فقط سازنده بازی می‌تواند ببندد.", show_alert=True)
+        return
+    del active_games[group_id]
+    await callback.message.edit_text("❌ بازی بسته شد.")
+
+# ====================== GUESS HANDLER ======================
+@dp.message(lambda m: m.chat.id in active_games)
+async def guess_number(message: types.Message):
+    group_id = message.chat.id
+    user_id = message.from_user.id
+    if user_id not in active_games[group_id]["participants"]:
+        return
+    try:
+        guess = int(to_english_numbers(message.text))
+    except:
+        return
+    target = active_games[group_id]["target"]
+    if guess == target:
+        await update_score(user_id, 1)
+        await message.reply(f"🎉 تبریک {message.from_user.mention()}! عدد درست بود.\nامتیاز +1")
+        del active_games[group_id]
+    elif guess < target:
+        await message.reply("🔼 عدد بزرگ‌تر است!")
+    else:
+        await message.reply("🔽 عدد کوچک‌تر است!")
+
+# ====================== SHOW TOP SCORES ======================
+@dp.message(Command("امتیاز_بازی"))
+async def show_top_scores(message: types.Message):
+    rows = await db.fetch("SELECT username, total_score FROM users ORDER BY total_score DESC LIMIT 10")
+    text = "🏆 ۱۰ نفر برتر:\n"
+    for i, row in enumerate(rows, 1):
+        text += f"{i}. @{row['username']} - {row['total_score']} امتیاز\n"
+    await message.reply(text)
+
+# ====================== STARTUP ======================
 async def main():
-    await init_db()
-    me = await bot.get_me()
-    print(f"🤖 Logged in as @{me.username}")
+    await db.connect()
+    await init_tables()
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
