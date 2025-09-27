@@ -160,7 +160,7 @@ async def range_selected(cb: types.CallbackQuery):
     group_id = cb.message.chat.id
     parts = cb.data.split("_")
     min_val, max_val = int(parts[1]), int(parts[2])
-    target = int(min_val + (max_val - min_val) * asyncio.random.random())
+    target = random.randint(min_val, max_val)
     active_games[group_id] = {"creator": cb.from_user.id, "target": target, "participants": set(), "range": (min_val, max_val)}
     await db.execute("INSERT INTO games(group_id, creator_id, target_number, start_time) VALUES($1,$2,$3,$4)",
                      group_id, cb.from_user.id, target, datetime.now())
@@ -186,7 +186,7 @@ async def custom_range_input(message: types.Message, state: FSMContext):
         await message.reply("❌ فرمت اشتباه است. لطفا به صورت min-max وارد کنید.")
         return
     min_val, max_val = int(match.group(1)), int(match.group(2))
-    target = int(min_val + (max_val - min_val) * asyncio.random.random())
+    target = random.randint(min_val, max_val)
     group_id = message.chat.id
     data = await state.get_data()
     active_games[group_id] = {"creator": data["creator"], "target": target, "participants": set(), "range": (min_val, max_val)}
