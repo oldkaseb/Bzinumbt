@@ -1,18 +1,18 @@
+import os
 import asyncio
 import asyncpg
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from datetime import datetime, timedelta
 import re
-import os
 
 # ====================== CONFIG ======================
-API_TOKEN = os.getenv("BOT_TOKEN")  # متغیر محیطی ریلوی برای توکن ربات
-DB_URI = os.getenv("DATABASE_URL")   # متغیر محیطی ریلوی برای دیتابیس PostgreSQL
+API_TOKEN = os.getenv("BOT_TOKEN")
+DB_URI = os.getenv("DATABASE_URL")
 CHANNEL_ID = "@RHINOSOUL_TM"
 SUPPORT = "@OLDKASEB"
 OWNER_IDS = [7662192190, 6041119040]
@@ -41,8 +41,7 @@ db = Database()
 
 # ====================== FSM ======================
 class GuessGame(StatesGroup):
-    waiting_for_range = State()
-    playing = State()
+    waiting_custom_range = State()
 
 # ====================== BOT INIT ======================
 bot = Bot(token=API_TOKEN)
@@ -130,20 +129,57 @@ async def start_cmd(message: types.Message):
     )
 
 # ====================== GROUP GAME ======================
-active_games = {}  # {group_id: {"creator": id, "target": num, "participants": set()}}
+active_games = {}  # {group_id: {"creator": id, "target": num, "participants": set(), "range": tuple}}
 
-@dp.message(lambda m: m.text and m.text.startswith("حدس عدد"))
+RANGES = [
+    (1, 10), (1, 50), (1, 100), (1, 200), (1, 500),
+    (1, 1000), (1, 2000), (1, 5000), (1, 10000), (1, 20000)
+]
+
+def range_panel():
+    kb = InlineKeyboardMarkup(row_width=2)
+    for r in RANGES:
+        kb.insert(InlineKeyboardButton(f"{r[0]}-{r[1]}", callback_data=f"range_{r[0]}_{r[1]}"))
+    kb.add(
+        InlineKeyboardButton("🎯 رنج سفارشی", callback_data="custom_range"),
+        InlineKeyboardButton("❌ بستن", callback_data="close_panel")
+    )
+    return kb
+
+@dp.message(Command("start_game"))
 async def start_guess_game(message: types.Message, state: FSMContext):
     admins = await get_admin_ids(message.chat.id)
     if message.from_user.id not in admins:
         await message.reply("❌ فقط ادمین‌ها می‌توانند بازی را شروع کنند.")
         return
-    await message.reply("🎮 لطفا بازه بازی را به صورت min-max وارد کنید (مثلا 1-1000):")
-    await state.set_state(GuessGame.waiting_for_range)
-    await state.update_data(creator=message.from_user.id)
+    await message.reply("🎮 لطفا بازه بازی را انتخاب کنید:", reply_markup=range_panel())
 
-@dp.message(GuessGame.waiting_for_range)
-async def set_game_range(message: types.Message, state: FSMContext):
+# ====================== CALLBACK HANDLERS ======================
+@dp.callback_query(lambda c: c.data.startswith("range_"))
+async def range_selected(cb: types.CallbackQuery):
+    group_id = cb.message.chat.id
+    parts = cb.data.split("_")
+    min_val, max_val = int(parts[1]), int(parts[2])
+    target = int(min_val + (max_val - min_val) * asyncio.random.random())
+    active_games[group_id] = {"creator": cb.from_user.id, "target": target, "participants": set(), "range": (min_val, max_val)}
+    await db.execute("INSERT INTO games(group_id, creator_id, target_number, start_time) VALUES($1,$2,$3,$4)",
+                     group_id, cb.from_user.id, target, datetime.now())
+    kb = InlineKeyboardMarkup(row_width=2)
+    kb.add(InlineKeyboardButton("🎮 منم بازی", callback_data="join_game"))
+    kb.add(InlineKeyboardButton("▶️ شروع بازی", callback_data="begin_game"))
+    kb.add(InlineKeyboardButton("❌ بستن", callback_data="close_game"))
+    await cb.message.edit_text(f"🎉 بازی آماده شد! بازه: {min_val}-{max_val}\nشرکت‌کنندگان وارد شوند:", reply_markup=kb)
+    await cb.answer()
+
+@dp.callback_query(lambda c: c.data == "custom_range")
+async def custom_range_cb(cb: types.CallbackQuery, state: FSMContext):
+    await cb.message.edit_text("لطفا رنج دلخواه را به صورت min-max وارد کنید (مثال: 1-1000)")
+    await state.set_state(GuessGame.waiting_custom_range)
+    await state.update_data(creator=cb.from_user.id)
+    await cb.answer()
+
+@dp.message(GuessGame.waiting_custom_range)
+async def custom_range_input(message: types.Message, state: FSMContext):
     text = to_english_numbers(message.text)
     match = re.match(r"(\d+)-(\d+)", text)
     if not match:
@@ -151,49 +187,54 @@ async def set_game_range(message: types.Message, state: FSMContext):
         return
     min_val, max_val = int(match.group(1)), int(match.group(2))
     target = int(min_val + (max_val - min_val) * asyncio.random.random())
-    data = await state.get_data()
     group_id = message.chat.id
+    data = await state.get_data()
     active_games[group_id] = {"creator": data["creator"], "target": target, "participants": set(), "range": (min_val, max_val)}
     await db.execute("INSERT INTO games(group_id, creator_id, target_number, start_time) VALUES($1,$2,$3,$4)",
                      group_id, data["creator"], target, datetime.now())
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton("🎮 منم بازی", callback_data="join_game")],
-        [InlineKeyboardButton("▶️ شروع بازی", callback_data="begin_game")],
-        [InlineKeyboardButton("❌ بستن", callback_data="close_game")]
-    ])
-    await message.reply(f"بازی آماده شد! بازه: {min_val} تا {max_val}\nشرکت‌کنندگان باید عضو {CHANNEL_ID} باشند.", reply_markup=kb)
+    kb = InlineKeyboardMarkup(row_width=2)
+    kb.add(InlineKeyboardButton("🎮 منم بازی", callback_data="join_game"))
+    kb.add(InlineKeyboardButton("▶️ شروع بازی", callback_data="begin_game"))
+    kb.add(InlineKeyboardButton("❌ بستن", callback_data="close_game"))
+    await message.reply(f"🎉 بازی آماده شد! بازه: {min_val}-{max_val}", reply_markup=kb)
     await state.clear()
 
-# ====================== CALLBACK HANDLERS ======================
+@dp.callback_query(lambda c: c.data == "close_panel")
+async def close_panel_cb(cb: types.CallbackQuery):
+    await cb.message.delete()
+    await cb.answer("پنل بسته شد ✅")
+
+# ====================== PARTICIPANTS ======================
 @dp.callback_query(lambda c: c.data == "join_game")
-async def join_game_cb(callback: types.CallbackQuery):
-    group_id = callback.message.chat.id
-    user_id = callback.from_user.id
-    username = callback.from_user.username
+async def join_game_cb(cb: types.CallbackQuery):
+    group_id = cb.message.chat.id
+    user_id = cb.from_user.id
+    username = cb.from_user.username
     if not await is_channel_member(user_id):
-        await callback.answer("❌ لطفا ابتدا عضو کانال شوید.", show_alert=True)
+        await cb.answer("❌ لطفا ابتدا عضو کانال شوید.", show_alert=True)
         return
     active_games[group_id]["participants"].add(user_id)
     await add_user(user_id, username)
-    await callback.answer("✅ وارد بازی شدی عزیزم!")
+    await cb.answer("✅ وارد بازی شدی عزیزم!")
 
 @dp.callback_query(lambda c: c.data == "begin_game")
-async def begin_game_cb(callback: types.CallbackQuery):
-    group_id = callback.message.chat.id
-    if callback.from_user.id != active_games[group_id]["creator"]:
-        await callback.answer("❌ فقط سازنده بازی می‌تواند شروع کند.", show_alert=True)
+async def begin_game_cb(cb: types.CallbackQuery):
+    group_id = cb.message.chat.id
+    if cb.from_user.id != active_games[group_id]["creator"]:
+        await cb.answer("❌ فقط سازنده بازی می‌تواند شروع کند.", show_alert=True)
         return
     min_val, max_val = active_games[group_id]["range"]
-    await callback.message.edit_text(f"🎉 بازی شروع شد! بازه: {min_val}-{max_val}\nعدد را حدس بزنید.")
+    await cb.message.edit_text(f"🎉 بازی شروع شد! بازه: {min_val}-{max_val}\nعدد را حدس بزنید.")
+    await cb.answer()
 
 @dp.callback_query(lambda c: c.data == "close_game")
-async def close_game_cb(callback: types.CallbackQuery):
-    group_id = callback.message.chat.id
-    if callback.from_user.id != active_games[group_id]["creator"]:
-        await callback.answer("❌ فقط سازنده بازی می‌تواند ببندد.", show_alert=True)
+async def close_game_cb(cb: types.CallbackQuery):
+    group_id = cb.message.chat.id
+    if cb.from_user.id != active_games[group_id]["creator"]:
+        await cb.answer("❌ فقط سازنده بازی می‌تواند ببندد.", show_alert=True)
         return
     del active_games[group_id]
-    await callback.message.edit_text("❌ بازی بسته شد.")
+    await cb.message.edit_text("❌ بازی بسته شد.")
 
 # ====================== GUESS HANDLER ======================
 @dp.message(lambda m: m.chat.id in active_games)
@@ -217,7 +258,7 @@ async def guess_number(message: types.Message):
         await message.reply("🔽 عدد کوچک‌تر است!")
 
 # ====================== SHOW TOP SCORES ======================
-@dp.message(Command("امتیاز_بازی"))
+@dp.message(Command("top_scores"))
 async def show_top_scores(message: types.Message):
     rows = await db.fetch("SELECT username, total_score FROM users ORDER BY total_score DESC LIMIT 10")
     text = "🏆 ۱۰ نفر برتر:\n"
@@ -225,10 +266,43 @@ async def show_top_scores(message: types.Message):
         text += f"{i}. @{row['username']} - {row['total_score']} امتیاز\n"
     await message.reply(text)
 
+# ====================== DAILY & MONTHLY RESET ======================
+async def daily_reset_task():
+    while True:
+        now = datetime.now()
+        next_run = datetime.combine(now.date(), datetime.min.time()) + timedelta(days=1)
+        wait_seconds = (next_run - now).total_seconds()
+        await asyncio.sleep(wait_seconds)
+
+        # ریست روزانه
+        await db.execute("UPDATE users SET daily_score = 0")
+        # گزارش روزانه
+        top_users = await db.fetch("SELECT username, daily_score FROM users ORDER BY daily_score DESC LIMIT 10")
+        text = "📊 گزارش روزانه بازی‌ها:\n"
+        if top_users:
+            for i, row in enumerate(top_users, 1):
+                text += f"{i}. @{row['username']} - {row['daily_score']} امتیاز\n"
+        else:
+            text += "هیچ بازی‌ای انجام نشده است.\n"
+        for owner_id in OWNER_IDS:
+            try:
+                await bot.send_message(owner_id, text)
+            except:
+                pass
+
+        # ریست ماهانه اگر روز اول ماه باشد
+        if now.day == 1:
+            top_month = await db.fetchrow("SELECT username, monthly_score FROM users ORDER BY monthly_score DESC LIMIT 1")
+            if top_month:
+                for owner_id in OWNER_IDS:
+                    await bot.send_message(owner_id, f"🏆 کاربر برتر ماه قبل: @{top_month['username']} - {top_month['monthly_score']} امتیاز")
+            await db.execute("UPDATE users SET monthly_score = 0")
+
 # ====================== STARTUP ======================
 async def main():
     await db.connect()
     await init_tables()
+    asyncio.create_task(daily_reset_task())
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
