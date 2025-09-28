@@ -178,14 +178,20 @@ async def hokm_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("حالت بازی حکم را انتخاب کنید:", reply_markup=InlineKeyboardMarkup(keyboard))
 
 async def hokm_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query, user, chat_id = update.callback_query, query.from_user, query.message.chat.id
+    # --- START OF FIX: Correctly initialize variables and add pre-checks ---
+    query = update.callback_query
+    user = query.from_user
+    chat_id = query.message.chat.id
+
+    # این چک بسیار مهم است تا مطمئن شویم کاربر شرایط لازم برای کلیک را دارد
     if not await pre_command_check(update, context): 
-        await query.answer()
+        await query.answer() # انیمیشن لودینگ را متوقف می‌کند
         return
+    # --- END OF FIX ---
     
     data = query.data.split('_')
     action = data[1]
-    
+
     if action == "start":
         await query.answer()
         mode = data[2]
@@ -193,7 +199,7 @@ async def hokm_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if chat_id not in active_games['hokm']: active_games['hokm'][chat_id] = {}
             msg = await query.edit_message_text("بازی حکم ۴ نفره شروع شد! منتظر ورود بازیکنان...")
             game_id = msg.message_id
-            active_games['hokm'][chat_id][game_id] = {"status": "joining", "players": [user.id], "message_id": game_id}
+            active_games['hokm'][chat_id][game_id] = {"status": "joining", "players": [user.id], "message_id": game_id, "starter_id": user.id}
             keyboard = [[InlineKeyboardButton("Join Game (1/4)", callback_data=f"hokm_join_{game_id}")]]
             await query.edit_message_reply_markup(reply_markup=InlineKeyboardMarkup(keyboard))
         else: # 2p
@@ -229,7 +235,7 @@ async def hokm_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_text(f"بازیکنان کامل شدند! حاکم {(await context.bot.get_chat(game['hakem_id'])).mention_html()} است. لطفاً حکم را انتخاب کنید:", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.HTML)
     
     elif action == "choose":
-        if user.id != game.get('hakem_id'): return await query.answer("شما حاکم نیستید!", show_alert=True)
+        if user.id != game.get('hakem_id'): return
         game['hokm_suit'] = data[3]
         game['status'] = 'playing'
         reply_markup = await render_hokm_board(game, context)
@@ -295,7 +301,7 @@ async def hokm_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             game['turn_index'] = (game['turn_index'] + 1) % 4
             reply_markup = await render_hokm_board(game, context)
             await query.edit_message_text("بازی در جریان است...", reply_markup=reply_markup, parse_mode=ParseMode.HTML)
-
+        
 # --------------------------- GAME: GUESS THE NUMBER (ConversationHandler) ---------------------------
 SELECTING_RANGE, GUESSING = range(2)
 async def hads_addad_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
