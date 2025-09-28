@@ -605,33 +605,60 @@ async def handle_typing_attempt(update: Update, context: ContextTypes.DEFAULT_TY
         del active_games['typing'][chat_id]
 
 # --------------------------- GAME: GHARCH & ETERAF ---------------------------
-async def anonymous_game_starter(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def gharch_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Starts the Gharch game with the correct name and button."""
     if not await force_join_middleware(update, context): return
-    command = update.message.text.split('/')[1]
     chat_id = update.effective_chat.id
     bot_username = (await context.bot.get_me()).username
 
-    title = "بازی قارچ 🍄" if command == "gharch" else "اعتراف ناشناس 🤫"
-    button_text = "ارسال پیام ناشناس 🍄" if command == "gharch" else "ارسال اعتراف ناشناس 🤫"
-    intro_text = "روی دکمه زیر کلیک کن و حرف دلت رو بنویس!"
+    title = "بازی قارچ 🍄"
+    button_text = "🍄 شرکت در بازی قارچ"
+    intro_text = "روی دکمه زیر کلیک کن و حرف دلت رو بنویس تا به صورت ناشناس در گروه ظاهر بشه!"
+    
     text = f"**{title} شروع شد!**\n\n{intro_text}"
-    keyboard = [[InlineKeyboardButton(button_text, url=f"https://t.me/{bot_username}?start={command}_{chat_id}")]]
+    keyboard = [[InlineKeyboardButton(button_text, url=f"https://t.me/{bot_username}?start=gharch_{chat_id}")]]
     await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.MARKDOWN)
+
+async def eteraf_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Starts a confession thread that replies to a specific message."""
+    if not await force_join_middleware(update, context): return
+    chat_id = update.effective_chat.id
+    bot_username = (await context.bot.get_me()).username
+    
+    # The bot replies to the command, creating the thread's root message
+    starter_message = await update.message.reply_text("یک موضوع اعتراف جدید شروع شد. برای ارسال اعتراف به صورت ناشناس (که به این پیام ریپلای می‌شود)، از دکمه زیر استفاده کنید.")
+    
+    title = "ارسال اعتراف 🤫"
+    button_text = "🤫 ارسال اعتراف"
+    
+    # The deep link now contains the message_id to reply to
+    keyboard = [[InlineKeyboardButton(button_text, url=f"https://t.me/{bot_username}?start=eteraf_{chat_id}_{starter_message.message_id}")]]
+    
+    # Edit the message to add the button
+    await starter_message.edit_text(starter_message.text, reply_markup=InlineKeyboardMarkup(keyboard))
 
 async def handle_anonymous_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_data = context.user_data
-    if 'anon_target_chat' not in user_data: return await update.message.reply_text("لطفا ابتدا از طریق دکمه‌ای که در گروه قرار دارد، بازی را شروع کنید.")
+    if 'anon_target_chat' not in user_data: return await update.message.reply_text("لطفا ابتدا از طریق دکمه‌ای که در گروه قرار دارد، فرآیند را شروع کنید.")
     
-    target_chat_id = user_data['anon_target_chat']['id']
-    game_type = user_data['anon_target_chat']['type']
+    target_info = user_data['anon_target_chat']
+    target_chat_id = target_info['id']
+    game_type = target_info['type']
+    reply_to_id = target_info.get('reply_to') # This will be None for Gharch
+
     header = "#پیام_ناشناس 🍄" if game_type == "gharch" else "#اعتراف_ناشناس 🤫"
     
     try:
-        await context.bot.send_message(chat_id=target_chat_id, text=f"{header}\n\n{update.message.text}")
+        await context.bot.send_message(
+            chat_id=target_chat_id,
+            text=f"{header}\n\n{update.message.text}",
+            reply_to_message_id=reply_to_id # Pass the message_id if it exists
+        )
         await update.message.reply_text("✅ پیامت با موفقیت به صورت ناشناس در گروه ارسال شد.")
     except Exception as e:
         await update.message.reply_text(f"⚠️ ارسال پیام با خطا مواجه شد: {e}")
     finally:
+        # Clear the pending state
         del context.user_data['anon_target_chat']
 
 # --------------------------- PLACEHOLDERS & SETTINGS ---------------------------
@@ -644,17 +671,33 @@ async def placeholder_command(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
+    
+    # --- START OF CHANGE ---
+    # Check for deep link payload (e.g., from Gharch/Eteraf)
     if context.args:
         try:
             payload = context.args[0]
-            game_type, chat_id_str = payload.split('_')
+            parts = payload.split('_')
+            game_type = parts[0]
+            
             if game_type in ["gharch", "eteraf"]:
-                context.user_data['anon_target_chat'] = {'id': int(chat_id_str), 'type': game_type}
-                prompt = "پیام خود را برای ارسال ناشناس بنویسید..." if game_type == "gharch" else "اعتراف خود را بنویسید..."
-                await update.message.reply_text(prompt)
-                return
-        except (ValueError, IndexError): pass
+                target_chat_id = int(parts[1])
+                # Store info for the next message
+                context.user_data['anon_target_chat'] = {'id': target_chat_id, 'type': game_type}
+                
+                # For Eteraf, also store the message_id to reply to
+                if game_type == "eteraf" and len(parts) > 2:
+                    context.user_data['anon_target_chat']['reply_to'] = int(parts[2])
 
+                # Send the pending message to the user
+                prompt_text = "پیام خود را برای ارسال ناشناس در بازی قارچ بنویسید..." if game_type == "gharch" else "اعتراف خود را بنویسید تا به صورت ناشناس در گروه ارسال شود..."
+                await update.message.reply_text(prompt_text)
+                return # Stop further execution for deep links
+        except (ValueError, IndexError):
+            pass # If payload is invalid, just proceed to normal start
+    # --- END OF CHANGE ---
+
+    # --- Normal start logic continues here ---
     conn = get_db_connection()
     if conn:
         with conn.cursor() as cur:
@@ -795,9 +838,9 @@ def main() -> None:
     application.add_handler(CommandHandler("dooz", dooz_command))
     application.add_handler(CommandHandler("hads_kalame", hads_kalame_command))
     application.add_handler(CommandHandler("type", type_command))
-    application.add_handler(CommandHandler("gharch", anonymous_game_starter))
-    application.add_handler(CommandHandler("eteraf", anonymous_game_starter))
-    
+    application.add_handler(CommandHandler("gharch", gharch_command))
+    application.add_handler(CommandHandler("eteraf", eteraf_command))
+
     # Placeholders
     application.add_handler(CommandHandler("hokm", hokm_command))
     application.add_handler(CommandHandler("cancel_hokm", cancel_hokm_command))
