@@ -775,7 +775,7 @@ def main() -> None:
 
     application = Application.builder().token(BOT_TOKEN).build()
 
-    # --- Conversation Handler for Guess the Number (اصلاح شده و اضافه شده) ---
+    # --- Conversation Handler for Guess the Number ---
     guess_number_conv = ConversationHandler(
         entry_points=[CommandHandler("hads_addad", hads_addad_command)],
         states={
@@ -786,20 +786,6 @@ def main() -> None:
         per_user=False, per_chat=True
     )
     application.add_handler(guess_number_conv)
-
-    # --- Core & Game Start Commands ---
-    application.add_handler(CommandHandler("start", start_command))
-    application.add_handler(CommandHandler("help", help_command))
-    application.add_handler(CommandHandler("hokm", hokm_command))
-    application.add_handler(CommandHandler("dooz", dooz_command))
-    application.add_handler(CommandHandler("hads_kalame", hads_kalame_command))
-    application.add_handler(CommandHandler("type", type_command))
-    application.add_handler(CommandHandler("gharch", gharch_command))
-    application.add_handler(CommandHandler("eteraf", eteraf_command))
-    
-    # --- Placeholder Commands ---
-    application.add_handler(CommandHandler("top", placeholder_command))
-    application.add_handler(CommandHandler("settings", placeholder_command))
 
     # --- Owner Commands ---
     application.add_handler(CommandHandler("setstart", set_start_command))
@@ -814,7 +800,20 @@ def main() -> None:
     application.add_handler(CommandHandler("ban_group", ban_group_command))
     application.add_handler(CommandHandler("unban_group", unban_group_command))
 
+    # --- Core & Game Start Commands ---
+    application.add_handler(CommandHandler("start", start_command))
+    application.add_handler(CommandHandler("help", help_command))
+    application.add_handler(CommandHandler("hokm", hokm_command))
+    application.add_handler(CommandHandler("dooz", dooz_command))
+    application.add_handler(CommandHandler("hads_kalame", hads_kalame_command))
+    application.add_handler(CommandHandler("type", type_command))
+    application.add_handler(CommandHandler("gharch", gharch_command))
+    application.add_handler(CommandHandler("eteraf", eteraf_command))
+    application.add_handler(CommandHandler("top", placeholder_command))
+    application.add_handler(CommandHandler("settings", placeholder_command))
+    
     # --- CallbackQuery Handlers for Buttons ---
+    # این بخش بسیار مهم است و باید بعد از دستورات باشد
     application.add_handler(CallbackQueryHandler(hokm_callback, pattern=r'^hokm_'))
     application.add_handler(CallbackQueryHandler(dooz_callback, pattern=r'^dooz_'))
 
@@ -831,3 +830,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
