@@ -271,7 +271,7 @@ async def hokm_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if player_has_suit and not card_played.startswith(start_suit):
                 return await query.answer("شما باید از خال زمین بازی کنید!", show_alert=True)
 
-        game['hands'][user.id'].remove(card_played)
+        game['hands'][user.id].remove(card_played)
         game['current_trick'].append({'player_id': user.id, 'card': card_played})
         
         # Clear the number pad after playing
