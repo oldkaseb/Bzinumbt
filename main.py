@@ -190,6 +190,7 @@ async def hokm_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     active_games['hokm'][chat_id][game_id] = game_state
 
 async def hokm_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    logger.info("hokm_callback function was triggered!")
     query, user, chat_id = update.callback_query, query.from_user, query.message.chat.id
     await query.answer()
 
