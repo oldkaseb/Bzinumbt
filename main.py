@@ -195,9 +195,9 @@ async def hokm_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     data = query.data.split('_')
     action = data[1]
-    
-    # --- استخراج شناسه بازی از دکمه ---
-    # فرمت جدید دکمه‌ها: hokm_action_gameid_...
+
+    # --- START OF FIX: Universal Game ID Extraction ---
+    # تمام دکمه‌های حکم حالا شناسه بازی را به عنوان اولین پارامتر دارند
     game_id = int(data[2])
 
     if chat_id not in active_games.get('hokm', {}) or game_id not in active_games['hokm'][chat_id]:
@@ -206,6 +206,7 @@ async def hokm_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     game = active_games['hokm'][chat_id][game_id]
+    # --- END OF FIX ---
 
     if action == "join":
         if user.id in game['players']: return
@@ -217,7 +218,7 @@ async def hokm_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if num_players < 4:
             keyboard = [[InlineKeyboardButton(f"Join Game ({num_players}/4)", callback_data=f"hokm_join_{game_id}")]]
             await query.edit_message_text(f"بازی حکم (ID: {game_id})\nبازیکنان وارد شده: {num_players}/4", reply_markup=InlineKeyboardMarkup(keyboard))
-        else:
+        else: # Game starts!
             await query.edit_message_text("بازیکنان کامل شدند! در حال بر زدن و شروع دست اول...")
             game.update({"status": "choosing_hokm", "teams": {'A': [game['players'][0], game['players'][2]], 'B': [game['players'][1], game['players'][3]]}, "hakem_id": None, "deck": create_deck(), "hands": {pid: [] for pid in game['players']}, "trick_scores": {'A': 0, 'B': 0}, "game_scores": game.get('game_scores', {'A': 0, 'B': 0}), "current_trick": []})
             
