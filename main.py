@@ -184,13 +184,20 @@ async def cancel_hokm_command(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 async def hokm_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query, user, chat_id = update.callback_query, query.from_user, query.message.chat.id
-    
-    if chat_id not in active_games.get('hokm', {}): return await query.answer("این بازی دیگر فعال نیست.", show_alert=True)
+    await query.answer() # <-- این خط بسیار مهم است
+
+    if chat_id not in active_games.get('hokm', {}):
+        try:
+            await query.edit_message_text("این بازی دیگر فعال نیست.")
+        except:
+            pass
+        return
+
     game = active_games['hokm'][chat_id]
 
     if query.data == "hokm_join":
-        if user.id in game['players']: return await query.answer("شما قبلاً وارد بازی شده‌اید.", show_alert=True)
-        if len(game['players']) >= 4: return await query.answer("ظرفیت بازی تکمیل است.", show_alert=True)
+        if user.id in game['players']: return
+        if len(game['players']) >= 4: return
         
         game['players'].append(user.id)
         num_players = len(game['players'])
@@ -199,7 +206,7 @@ async def hokm_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             keyboard = [[InlineKeyboardButton(f"Join Game ({num_players}/4)", callback_data="hokm_join")]]
             await query.edit_message_text(f"بازی حکم! بازیکنان وارد شده: {num_players}/4", reply_markup=InlineKeyboardMarkup(keyboard))
         else:
-            await query.edit_message_text("بازیکنان کامل شدند! در حال شروع دست اول...")
+            await query.edit_message_text("بازیکنان کامل شدند! در حال بر زدن و شروع دست اول...")
             game.update({"status": "choosing_hokm", "teams": {'A': [game['players'][0], game['players'][2]], 'B': [game['players'][1], game['players'][3]]}, "hakem_id": None, "deck": create_deck(), "hands": {pid: [] for pid in game['players']}, "trick_scores": {'A': 0, 'B': 0}, "game_scores": game.get('game_scores', {'A': 0, 'B': 0}), "current_trick": []})
             for i in range(52):
                 player_id, card = game['players'][i % 4], game['deck'].pop(0)
@@ -213,6 +220,8 @@ async def hokm_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await context.bot.send_message(game['hakem_id'], "شما حاکم هستید. لطفاً حکم را انتخاب کنید:", reply_markup=InlineKeyboardMarkup(keyboard))
             await query.edit_message_text(await render_hokm_board(game, context), parse_mode=ParseMode.HTML)
             
+    # ... (بقیه منطق بازی حکم که در پاسخ‌های قبلی کامل شده بود)
+
     elif query.data.startswith("hokm_choose_"):
         if user.id != game.get('hakem_id'): return await query.answer("شما حاکم نیستید!", show_alert=True)
         game['hokm_suit'] = query.data.split('_')[-1]
