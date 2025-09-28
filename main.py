@@ -31,7 +31,7 @@ OWNER_IDS = [7662192190, 6041119040]
 SUPPORT_USERNAME = "OLDKASEB"
 FORCED_JOIN_CHANNEL = "@RHINOSOUL_TM"
 GROUP_INSTALL_LIMIT = 50
-INITIAL_LIVES = 6  # تعداد جان اولیه در بازی حدس کلمه
+INITIAL_LIVES = 6
 
 # --- لیست کلمات و جملات ---
 WORD_LIST = ["فضاپیما", "کهکشان", "الگوریتم", "کتابخانه", "دانشگاه", "کامپیوتر", "اینترنت", "برنامه", "نویسی", "هوش", "مصنوعی", "یادگیری", "ماشین", "شبکه", "عصبی", "داده", "کاوی", "پایتون", "جاوا", "اسکریپت", "فناوری", "اطلاعات", "امنیت", "سایبری", "حمله", "ویروس", "بدافزار", "آنتی", "ویروس", "دیوار", "آتش", "رمزنگاری", "پروتکل", "اینترنت", "دامنه", "میزبانی", "وب", "سرور", "کلاینت", "پایگاه", "داده", "رابط", "کاربری", "تجربه", "کاربری", "طراحی", "گرافیک", "انیمیشن", "سه", "بعدی", "واقعیت", "مجازی", "افزوده", "بلاکچین", "ارز", "دیجیتال", "بیتکوین", "اتریوم", "قرارداد", "هوشمند", "متاورس", "اینترنت", "اشیاء", "رباتیک", "خودرو", "خودران", "پهپاد", "سنسور", "پردازش", "تصویر", "سیگنال", "مخابرات", "ماهواره", "فرکانس", "موج", "الکترومغناطیس", "فیزیک", "کوانتوم", "نسبیت", "انیشتین", "نیوتن", "گرانش", "سیاهچاله", "ستاره", "نوترونی", "انفجار", "بزرگ", "کیهان", "شناسی", "اختر", "فیزیک", "شیمی", "آلی", "معدنی", "تجزیه", "بیوشیمی", "ژنتیک", "سلول", "بافت", "ارگان", "متابولیسم", "فتوسنتز", "تنفس", "سلولی", "زیست", "شناسی", "میکروبیولوژی", "باکتری", "قارچ", "ویروس", "پزشکی", "داروسازی", "جراحی", "قلب", "مغز", "اعصاب", "روانشناسی", "جامعه", "شناسی", "اقتصاد", "بازار", "سرمایه", "بورس", "سهام", "تورم", "رکود", "رشد", "اقتصادی", "تولید", "ناخالص", "داخلی", "صادرات", "واردات", "تجارت", "بین", "الملل", "سیاست", "دموکراسی", "دیکتاتوری", "جمهوری", "پادشاهی", "انتخابات", "پارلمان", "دولت", "قوه", "قضائیه", "تاریخ", "باستان", "معاصر", "جنگ", "جهانی", "صلیبی", "رنسانس", "اصلاحات", "دینی", "انقلاب", "صنعتی", "فلسفه", "منطق", "اخلاق", "زیبایی", "شناسی", "افلاطون", "ارسطو", "سقراط", "دکارت", "کانت", "نیچه", "ادبیات", "شعر", "رمان", "داستان", "کوتاه", "نمایشنامه", "حافظ", "سعدی", "فردوسی", "مولانا", "خیام", "شکسپیر", "تولستوی", "داستایوفسکی", "هنر", "نقاشی", "مجسمه", "سازی", "معماری", "موسیقی", "سینما", "تئاتر", "عکاسی"]
@@ -43,7 +43,6 @@ logger = logging.getLogger(__name__)
 
 # --- مدیریت دیتابیس ---
 DATABASE_URL = os.environ.get("DATABASE_URL")
-
 def get_db_connection():
     try: return psycopg2.connect(DATABASE_URL)
     except Exception as e:
@@ -74,7 +73,7 @@ def convert_persian_to_english_numbers(text: str) -> str:
     return text.translate(str.maketrans("۰۱۲۳۴۵۶۷۸۹", "0123456789"))
 
 # --- مدیریت وضعیت بازی‌ها ---
-active_games = {'guess_number': {}, 'dooz': {}, 'hangman': {}, 'typing': {}}
+active_games = {'guess_number': {}, 'dooz': {}, 'hangman': {}, 'typing': {}, 'hokm': {}}
 
 # --- منطق عضویت اجباری ---
 async def force_join_middleware(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
@@ -98,151 +97,14 @@ async def force_join_middleware(update: Update, context: ContextTypes.DEFAULT_TY
         await target_chat.send_message(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.HTML)
     return False
 
-def create_deck():
-    suits = ['S', 'H', 'D', 'C'] # Spades, Hearts, Diamonds, Clubs
-    ranks = list(range(2, 15)) # 2-10, J, Q, K, A
-    deck = [f"{s}{r}" for s in suits for r in ranks]
-    random.shuffle(deck)
-    return deck
+# =================================================================
+# ======================== GAME LOGIC START =======================
+# =================================================================
 
-def card_to_persian(card):
-    if not card: return "🃏"
-    suits = {'S': '♠️', 'H': '♥️', 'D': '♦️', 'C': '♣️'}
-    ranks = {11: 'J', 12: 'Q', 13: 'K', 14: 'A'}
-    suit, rank = card[0], int(card[1:])
-    rank_str = str(ranks.get(rank, rank))
-    return f"{suits[suit]} {rank_str}"
-
-def get_card_value(card, hokm_suit):
-    suit, rank = card[0], int(card[1:])
-    # Add a large bonus for hokm suit to ensure it always wins over other suits
-    if suit == hokm_suit:
-        return rank + 100
-    return rank
-
-async def render_hokm_board(game, context: ContextTypes.DEFAULT_TYPE, message=""):
-    """Generates the text for the main game message."""
-    p_mentions = [await context.bot.get_chat(pid) for pid in game['players']]
-    
-    board = f"<b>بازی حکم</b>\n\n"
-    board += f"تیم A: {p_mentions[0].mention_html()} و {p_mentions[2].mention_html()}\n"
-    board += f"تیم B: {p_mentions[1].mention_html()} و {p_mentions[3].mention_html()}\n\n"
-    
-    board += f"🏆 امتیاز کل: <b>تیم A: {game['game_scores']['A']}</b> - <b>تیم B: {game['game_scores']['B']}</b>\n"
-    board += f"✔️ دست‌های برده: <b>تیم A: {game['trick_scores']['A']}</b> - <b>تیم B: {game['trick_scores']['B']}</b>\n\n"
-    
-    if game['status'] == 'choosing_hokm':
-        board += f"👑 حاکم: {p_mentions[game['players'].index(game['hakem_id'])].mention_html()}\nمنتظر انتخاب حکم هستیم..."
-    elif game['status'] == 'playing':
-        hokm_suit_fa = card_to_persian(f"{game['hokm_suit']}2")[0]
-        board += f"👑 حکم: <b>{hokm_suit_fa}</b>\n"
-        
-        turn_player_mention = p_mentions[game['turn_index']].mention_html()
-        board += f"➡️ نوبت: {turn_player_mention}\n\n"
-        
-        board += "کارت‌های روی زمین:\n"
-        if not game['current_trick']:
-            board += "<i>(هنوز کارتی بازی نشده)</i>"
-        else:
-            for play in game['current_trick']:
-                player_mention = (await context.bot.get_chat(play['player_id'])).mention_html()
-                board += f"- {card_to_persian(play['card'])} (توسط {player_mention})\n"
-    
-    if message:
-        board += f"\n📢 <i>{message}</i>"
-
-    return board
-
-async def hokm_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not await force_join_middleware(update, context): return
-    chat_id = update.effective_chat.id
-    if chat_id in active_games['hokm']:
-        return await update.message.reply_text("یک بازی حکم در این گروه فعال است. برای لغو بازی قبلی از /cancel_hokm استفاده کنید.")
-        
-    game_state = { "status": "joining", "players": [update.effective_user.id] }
-    active_games['hokm'][chat_id] = game_state
-    
-    keyboard = [[InlineKeyboardButton("Join Game (1/4)", callback_data="hokm_join")]]
-    msg = await update.message.reply_text("بازی حکم شروع شد! منتظر ورود ۴ بازیکن...", reply_markup=InlineKeyboardMarkup(keyboard))
-    game_state["message_id"] = msg.message_id
-
-async def cancel_hokm_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat_id = update.effective_chat.id
-    if chat_id in active_games['hokm']:
-        del active_games['hokm'][chat_id]
-        await update.message.reply_text("بازی حکم با موفقیت لغو شد.")
-
-async def hokm_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    user = query.from_user
-    chat_id = query.message.chat.id
-    
-    if chat_id not in active_games['hokm']: return await query.answer("این بازی دیگر فعال نیست.", show_alert=True)
-    game = active_games['hokm'][chat_id]
-
-    # --- JOINING LOGIC ---
-    if query.data == "hokm_join":
-        if user.id in game['players']: return await query.answer("شما قبلاً وارد بازی شده‌اید.", show_alert=True)
-        if len(game['players']) >= 4: return await query.answer("ظرفیت بازی تکمیل است.", show_alert=True)
-        
-        game['players'].append(user.id)
-        num_players = len(game['players'])
-        
-        if num_players < 4:
-            keyboard = [[InlineKeyboardButton(f"Join Game ({num_players}/4)", callback_data="hokm_join")]]
-            await query.edit_message_text(f"بازی حکم! بازیکنان وارد شده: {num_players}/4", reply_markup=InlineKeyboardMarkup(keyboard))
-        else: # Game starts!
-            await query.edit_message_text("بازیکنان کامل شدند! در حال بر زدن و شروع دست اول...")
-            
-            # --- SETUP PHASE ---
-            game.update({
-                "status": "choosing_hokm",
-                "teams": {'A': [game['players'][0], game['players'][2]], 'B': [game['players'][1], game['players'][3]]},
-                "hakem_id": None, "deck": create_deck(), "hands": {pid: [] for pid in game['players']},
-                "trick_scores": {'A': 0, 'B': 0}, "game_scores": game.get('game_scores', {'A': 0, 'B': 0}),
-                "current_trick": []
-            })
-            
-            # Deal cards and find Hakem
-            for i in range(52):
-                player_id = game['players'][i % 4]
-                card = game['deck'].pop()
-                game['hands'][player_id].append(card)
-                if card == 'S14' and game['hakem_id'] is None: game['hakem_id'] = player_id
-            
-            if game['hakem_id'] is None: game['hakem_id'] = game['players'][0]
-            game['turn_index'] = game['players'].index(game['hakem_id'])
-
-            keyboard = [[InlineKeyboardButton(s, callback_data=f"hokm_choose_{s[0]}") for s in ["♠️", "♥️", "♦️", "♣️"]]]
-            await context.bot.send_message(game['hakem_id'], "شما حاکم هستید. لطفاً حکم را انتخاب کنید:", reply_markup=InlineKeyboardMarkup(keyboard))
-            await query.edit_message_text(await render_hokm_board(game, context), parse_mode=ParseMode.HTML)
-            
-    # --- CHOOSING HOKM LOGIC ---
-    elif query.data.startswith("hokm_choose_"):
-        if user.id != game.get('hakem_id'): return await query.answer("شما حاکم نیستید!", show_alert=True)
-        
-        game['hokm_suit'] = query.data.split('_')[-1]
-        game['status'] = 'playing'
-        
-        try: await query.delete_message()
-        except: pass
-        
-        board_text = await render_hokm_board(game, context, f"حکم {card_to_persian(game['hokm_suit']+'2')[0]} انتخاب شد.")
-        keyboard = [[InlineKeyboardButton("🃏 نمایش/بازی کارت", callback_data="hokm_show")]]
-        await context.bot.edit_message_text(chat_id, game['message_id'], board_text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.HTML)
-
-    # --- PLAYING LOGIC ---
-    elif query.data == "hokm_show":
-        if user.id != game['players'][game['turn_index']]: return await query.answer("نوبت شما نیست!", show_alert=True)
-        hand_str = ", ".join([card_to_persian(c) for c in sorted(game['hands'][user.id])])
-        await query.answer(f"کارت‌های شما: {hand_str}", show_alert=True)
-        
-        # Determine valid moves
-        valid_cards = game['hands'][user.id]
 # --------------------------- GAME: HOKM (کامل و اصلاح شده) ---------------------------
 def create_deck():
-    suits = ['S', 'H', 'D', 'C'] # Spades, Hearts, Diamonds, Clubs
-    ranks = list(range(2, 15)) # 2-10, J, Q, K, A
+    suits = ['S', 'H', 'D', 'C']
+    ranks = list(range(2, 15))
     deck = [f"{s}{r}" for s in suits for r in ranks]
     random.shuffle(deck)
     return deck
@@ -252,8 +114,7 @@ def card_to_persian(card):
     suits = {'S': '♠️', 'H': '♥️', 'D': '♦️', 'C': '♣️'}
     ranks = {11: 'J', 12: 'Q', 13: 'K', 14: 'A'}
     suit, rank = card[0], int(card[1:])
-    rank_str = str(ranks.get(rank, rank))
-    return f"{suits[suit]} {rank_str}"
+    return f"{suits[suit]} {str(ranks.get(rank, rank))}"
 
 def get_card_value(card, hokm_suit):
     suit, rank = card[0], int(card[1:])
@@ -265,8 +126,8 @@ async def render_hokm_board(game, context: ContextTypes.DEFAULT_TYPE, message=""
     board = f"<b>بازی حکم</b>\n\n"
     board += f"تیم A: {p_mentions[0].mention_html()} و {p_mentions[2].mention_html()}\n"
     board += f"تیم B: {p_mentions[1].mention_html()} و {p_mentions[3].mention_html()}\n\n"
-    board += f"🏆 امتیاز کل: <b>تیم A: {game.get('game_scores', {'A':0})['A']}</b> - <b>تیم B: {game.get('game_scores', {'B':0})['B']}</b>\n"
-    board += f"✔️ دست‌های برده: <b>تیم A: {game['trick_scores']['A']}</b> - <b>تیم B: {game['trick_scores']['B']}</b>\n\n"
+    board += f"🏆 امتیاز کل: <b>A: {game.get('game_scores', {'A':0})['A']}</b> - <b>B: {game.get('game_scores', {'B':0})['B']}</b>\n"
+    board += f"✔️ دست‌های برده: <b>A: {game['trick_scores']['A']}</b> - <b>B: {game['trick_scores']['B']}</b>\n\n"
     
     if game['status'] == 'choosing_hokm':
         board += f"👑 حاکم: {p_mentions[game['players'].index(game['hakem_id'])].mention_html()}\nمنتظر انتخاب حکم هستیم..."
@@ -276,8 +137,7 @@ async def render_hokm_board(game, context: ContextTypes.DEFAULT_TYPE, message=""
         turn_player_mention = p_mentions[game['turn_index']].mention_html()
         board += f"➡️ نوبت: {turn_player_mention}\n\n"
         board += "کارت‌های روی زمین:\n"
-        if not game['current_trick']:
-            board += "<i>(هنوز کارتی بازی نشده)</i>"
+        if not game['current_trick']: board += "<i>(هنوز کارتی بازی نشده)</i>"
         else:
             for play in game['current_trick']:
                 player_mention = (await context.bot.get_chat(play['player_id'])).mention_html()
@@ -288,9 +148,10 @@ async def render_hokm_board(game, context: ContextTypes.DEFAULT_TYPE, message=""
 async def hokm_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await force_join_middleware(update, context): return
     chat_id = update.effective_chat.id
-    if chat_id in active_games['hokm']:
-        return await update.message.reply_text("یک بازی حکم در این گروه فعال است. برای لغو بازی قبلی از /cancel_hokm استفاده کنید.")
-    game_state = { "status": "joining", "players": [update.effective_user.id], "message_id": None }
+    if chat_id in active_games.get('hokm', {}):
+        return await update.message.reply_text("یک بازی حکم فعال است. برای لغو: /cancel_hokm")
+    
+    game_state = {"status": "joining", "players": [update.effective_user.id]}
     active_games['hokm'][chat_id] = game_state
     keyboard = [[InlineKeyboardButton("Join Game (1/4)", callback_data="hokm_join")]]
     msg = await update.message.reply_text("بازی حکم شروع شد! منتظر ورود ۴ بازیکن...", reply_markup=InlineKeyboardMarkup(keyboard))
@@ -298,20 +159,19 @@ async def hokm_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cancel_hokm_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
-    if chat_id in active_games['hokm']:
+    if chat_id in active_games.get('hokm', {}):
         del active_games['hokm'][chat_id]
         await update.message.reply_text("بازی حکم با موفقیت لغو شد.")
 
 async def hokm_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query, user, chat_id = update.callback_query, query.from_user, query.message.chat.id
-    await query.answer()
-
-    if chat_id not in active_games['hokm']: return await query.edit_message_text("این بازی دیگر فعال نیست.")
+    
+    if chat_id not in active_games.get('hokm', {}): return await query.answer("این بازی دیگر فعال نیست.", show_alert=True)
     game = active_games['hokm'][chat_id]
 
     if query.data == "hokm_join":
-        if user.id in game['players']: return
-        if len(game['players']) >= 4: return
+        if user.id in game['players']: return await query.answer("شما قبلاً وارد بازی شده‌اید.", show_alert=True)
+        if len(game['players']) >= 4: return await query.answer("ظرفیت بازی تکمیل است.", show_alert=True)
         
         game['players'].append(user.id)
         num_players = len(game['players'])
@@ -320,10 +180,10 @@ async def hokm_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             keyboard = [[InlineKeyboardButton(f"Join Game ({num_players}/4)", callback_data="hokm_join")]]
             await query.edit_message_text(f"بازی حکم! بازیکنان وارد شده: {num_players}/4", reply_markup=InlineKeyboardMarkup(keyboard))
         else:
-            await query.edit_message_text("بازیکنان کامل شدند! در حال بر زدن و شروع دست اول...")
+            await query.edit_message_text("بازیکنان کامل شدند! در حال شروع دست اول...")
             game.update({"status": "choosing_hokm", "teams": {'A': [game['players'][0], game['players'][2]], 'B': [game['players'][1], game['players'][3]]}, "hakem_id": None, "deck": create_deck(), "hands": {pid: [] for pid in game['players']}, "trick_scores": {'A': 0, 'B': 0}, "game_scores": game.get('game_scores', {'A': 0, 'B': 0}), "current_trick": []})
             for i in range(52):
-                player_id, card = game['players'][i % 4], game['deck'].pop()
+                player_id, card = game['players'][i % 4], game['deck'].pop(0)
                 game['hands'][player_id].append(card)
                 if card == 'S14' and game['hakem_id'] is None: game['hakem_id'] = player_id
             
@@ -335,7 +195,7 @@ async def hokm_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_text(await render_hokm_board(game, context), parse_mode=ParseMode.HTML)
             
     elif query.data.startswith("hokm_choose_"):
-        if user.id != game.get('hakem_id'): return
+        if user.id != game.get('hakem_id'): return await query.answer("شما حاکم نیستید!", show_alert=True)
         game['hokm_suit'] = query.data.split('_')[-1]
         game['status'] = 'playing'
         try: await query.delete_message()
@@ -345,7 +205,7 @@ async def hokm_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await context.bot.edit_message_text(chat_id, game['message_id'], board_text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.HTML)
 
     elif query.data == "hokm_show":
-        if user.id != game['players'][game['turn_index']]: return
+        if user.id != game['players'][game['turn_index']]: return await query.answer("نوبت شما نیست!", show_alert=True)
         hand_str = ", ".join([card_to_persian(c) for c in sorted(game['hands'][user.id])])
         await query.answer(f"کارت‌های شما: {hand_str}", show_alert=True)
         valid_cards = game['hands'][user.id]
@@ -358,8 +218,7 @@ async def hokm_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_reply_markup(reply_markup=InlineKeyboardMarkup(keyboard))
         
     elif query.data.startswith("hokm_play_"):
-        if user.id != game['players'][game['turn_index']]: return
-        
+        if user.id != game['players'][game['turn_index']]: return await query.answer("نوبت شما نیست!", show_alert=True)
         card_played = query.data.split('_')[-1]
         game['hands'][user.id].remove(card_played)
         game['current_trick'].append({'player_id': user.id, 'card': card_played})
@@ -388,10 +247,11 @@ async def hokm_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     del active_games['hokm'][chat_id]
                     return
                 else:
-                    message = f"تیم {winner_team} این راند را برد! آماده برای راند بعد..."
-                    # Reset for next round (simplified)
-                    del active_games['hokm'][chat_id] # Simplified: end after one round.
-            
+                    message = f"تیم {winner_team} این راند را برد! برای شروع راند بعد از دستور /hokm استفاده کنید."
+                    await query.edit_message_text(await render_hokm_board(game, context, message), parse_mode=ParseMode.HTML)
+                    del active_games['hokm'][chat_id]
+                    return
+
             board_text = await render_hokm_board(game, context, message)
             keyboard = [[InlineKeyboardButton("🃏 نمایش/بازی کارت", callback_data="hokm_show")]]
             await query.edit_message_text(board_text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.HTML)
@@ -400,6 +260,7 @@ async def hokm_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             board_text = await render_hokm_board(game, context)
             keyboard = [[InlineKeyboardButton("🃏 نمایش/بازی کارت", callback_data="hokm_show")]]
             await query.edit_message_text(board_text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.HTML)
+    await query.answer()
 
 # --------------------------- GAME: GUESS THE NUMBER (ConversationHandler) ---------------------------
 SELECTING_RANGE, GUESSING = range(2)
@@ -478,7 +339,8 @@ async def dooz_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.HTML)
 
 async def dooz_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query, user = update.callback_query, update.effective_user
+    query, user = update.callback_query, query.from_user
+    await query.answer()
     if not await force_join_middleware(update, context): return
     
     data = query.data.split('_')
@@ -526,7 +388,6 @@ async def dooz_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             text = f"نوبت {(await context.bot.get_chat(game['turn'])).mention_html()} است."
         await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.HTML)
-    await query.answer()
 
 # --------------------------- GAME: HADS KALAME (با جان جداگانه) ---------------------------
 async def hads_kalame_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -556,7 +417,6 @@ async def handle_letter_guess(update: Update, context: ContextTypes.DEFAULT_TYPE
         for i, letter in enumerate(game['word']):
             if letter == guess: game['display'][i] = letter
         if "_" not in game['display']:
-            # FIX IS HERE: Added parse_mode=ParseMode.HTML
             await update.message.reply_text(f"✅ **{user.mention_html()}** برنده شد! کلمه صحیح `{game['word']}` بود.", parse_mode=ParseMode.HTML)
             del active_games['hangman'][chat_id]
         else:
@@ -568,20 +428,26 @@ async def handle_letter_guess(update: Update, context: ContextTypes.DEFAULT_TYPE
             await update.message.reply_text(f"اشتباه بود {user.mention_html()}! شما **{lives_left}** جان دیگر دارید.", parse_mode=ParseMode.HTML)
         else:
             await update.message.reply_text(f"{user.mention_html()} تمام جان‌های خود را از دست داد و از بازی حذف شد.", parse_mode=ParseMode.HTML)
-            if all(lives == 0 for lives in game['players'].values()):
+            if all(lives == 0 for lives in game['players'].values() if lives is not None):
                 await update.message.reply_text(f"☠️ همه باختید! کلمه صحیح `{game['word']}` بود.", parse_mode=ParseMode.MARKDOWN)
                 del active_games['hangman'][chat_id]
 
 # --------------------------- GAME: TYPE SPEED ---------------------------
 def create_typing_image(text: str) -> io.BytesIO:
-    try:
-        # This line needs the font file to exist
-        font = ImageFont.truetype("Vazir.ttf", 24)
+    try: font = ImageFont.truetype("Vazir.ttf", 24)
     except IOError:
-        # If the file is not found, it falls back to a default font that causes the error
+        logger.warning("Vazir.ttf font not found. Falling back to default. Persian text may not render.")
         font = ImageFont.load_default()
     
-    # ... rest of the image creation code
+    dummy_img, draw = Image.new('RGB', (1, 1)), ImageDraw.Draw(Image.new('RGB', (1, 1)))
+    _, _, w, h = draw.textbbox((0, 0), text, font=font)
+    img = Image.new('RGB', (w + 40, h + 40), color = (255, 255, 255))
+    ImageDraw.Draw(img).text((20,20), text, fill=(0,0,0), font=font, align="right")
+    bio = io.BytesIO()
+    bio.name = 'image.jpeg'
+    img.save(bio, 'JPEG')
+    bio.seek(0)
+    return bio
 
 async def type_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await force_join_middleware(update, context): return
@@ -606,59 +472,31 @@ async def handle_typing_attempt(update: Update, context: ContextTypes.DEFAULT_TY
 
 # --------------------------- GAME: GHARCH & ETERAF ---------------------------
 async def gharch_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Starts the Gharch game with the correct name and button."""
     if not await force_join_middleware(update, context): return
     chat_id = update.effective_chat.id
     bot_username = (await context.bot.get_me()).username
-
-    title = "بازی قارچ 🍄"
-    button_text = "🍄 شرکت در بازی قارچ"
-    intro_text = "روی دکمه زیر کلیک کن و حرف دلت رو بنویس تا به صورت ناشناس در گروه ظاهر بشه!"
-    
-    text = f"**{title} شروع شد!**\n\n{intro_text}"
-    keyboard = [[InlineKeyboardButton(button_text, url=f"https://t.me/{bot_username}?start=gharch_{chat_id}")]]
+    text = "**بازی قارچ 🍄 شروع شد!**\n\nروی دکمه زیر کلیک کن و حرف دلت رو بنویس تا به صورت ناشناس در گروه ظاهر بشه!"
+    keyboard = [[InlineKeyboardButton("🍄 شرکت در بازی قارچ", url=f"https://t.me/{bot_username}?start=gharch_{chat_id}")]]
     await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.MARKDOWN)
 
 async def eteraf_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Starts a confession thread that replies to a specific message."""
     if not await force_join_middleware(update, context): return
-    chat_id = update.effective_chat.id
-    bot_username = (await context.bot.get_me()).username
-    
-    # The bot replies to the command, creating the thread's root message
-    starter_message = await update.message.reply_text("یک موضوع اعتراف جدید شروع شد. برای ارسال اعتراف به صورت ناشناس (که به این پیام ریپلای می‌شود)، از دکمه زیر استفاده کنید.")
-    
-    title = "ارسال اعتراف 🤫"
-    button_text = "🤫 ارسال اعتراف"
-    
-    # The deep link now contains the message_id to reply to
-    keyboard = [[InlineKeyboardButton(button_text, url=f"https://t.me/{bot_username}?start=eteraf_{chat_id}_{starter_message.message_id}")]]
-    
-    # Edit the message to add the button
-    await starter_message.edit_text(starter_message.text, reply_markup=InlineKeyboardMarkup(keyboard))
+    chat_id, bot_username = update.effective_chat.id, (await context.bot.get_me()).username
+    starter_message = await update.message.reply_text("یک موضوع اعتراف جدید شروع شد. برای ارسال اعتراف ناشناس (که به این پیام ریپلای می‌شود)، از دکمه زیر استفاده کنید.")
+    keyboard = [[InlineKeyboardButton("🤫 ارسال اعتراف", url=f"https://t.me/{bot_username}?start=eteraf_{chat_id}_{starter_message.message_id}")]]
+    await starter_message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(keyboard))
 
 async def handle_anonymous_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_data = context.user_data
     if 'anon_target_chat' not in user_data: return await update.message.reply_text("لطفا ابتدا از طریق دکمه‌ای که در گروه قرار دارد، فرآیند را شروع کنید.")
-    
-    target_info = user_data['anon_target_chat']
-    target_chat_id = target_info['id']
-    game_type = target_info['type']
-    reply_to_id = target_info.get('reply_to') # This will be None for Gharch
-
+    target_info, game_type, reply_to_id = user_data['anon_target_chat'], user_data['anon_target_chat']['type'], user_data['anon_target_chat'].get('reply_to')
     header = "#پیام_ناشناس 🍄" if game_type == "gharch" else "#اعتراف_ناشناس 🤫"
-    
     try:
-        await context.bot.send_message(
-            chat_id=target_chat_id,
-            text=f"{header}\n\n{update.message.text}",
-            reply_to_message_id=reply_to_id # Pass the message_id if it exists
-        )
+        await context.bot.send_message(chat_id=target_info['id'], text=f"{header}\n\n{update.message.text}", reply_to_message_id=reply_to_id)
         await update.message.reply_text("✅ پیامت با موفقیت به صورت ناشناس در گروه ارسال شد.")
     except Exception as e:
         await update.message.reply_text(f"⚠️ ارسال پیام با خطا مواجه شد: {e}")
     finally:
-        # Clear the pending state
         del context.user_data['anon_target_chat']
 
 # --------------------------- PLACEHOLDERS & SETTINGS ---------------------------
@@ -671,45 +509,26 @@ async def placeholder_command(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
-    
-    # --- START OF CHANGE ---
-    # Check for deep link payload (e.g., from Gharch/Eteraf)
     if context.args:
         try:
             payload = context.args[0]
             parts = payload.split('_')
-            game_type = parts[0]
-            
+            game_type, target_chat_id = parts[0], int(parts[1])
             if game_type in ["gharch", "eteraf"]:
-                target_chat_id = int(parts[1])
-                # Store info for the next message
                 context.user_data['anon_target_chat'] = {'id': target_chat_id, 'type': game_type}
-                
-                # For Eteraf, also store the message_id to reply to
-                if game_type == "eteraf" and len(parts) > 2:
-                    context.user_data['anon_target_chat']['reply_to'] = int(parts[2])
+                if game_type == "eteraf" and len(parts) > 2: context.user_data['anon_target_chat']['reply_to'] = int(parts[2])
+                prompt = "پیام خود را برای ارسال ناشناس در بازی قارچ بنویسید..." if game_type == "gharch" else "اعتراف خود را بنویسید تا به صورت ناشناس در گروه ارسال شود..."
+                await update.message.reply_text(prompt)
+                return
+        except (ValueError, IndexError): pass
 
-                # Send the pending message to the user
-                prompt_text = "پیام خود را برای ارسال ناشناس در بازی قارچ بنویسید..." if game_type == "gharch" else "اعتراف خود را بنویسید تا به صورت ناشناس در گروه ارسال شود..."
-                await update.message.reply_text(prompt_text)
-                return # Stop further execution for deep links
-        except (ValueError, IndexError):
-            pass # If payload is invalid, just proceed to normal start
-    # --- END OF CHANGE ---
-
-    # --- Normal start logic continues here ---
     conn = get_db_connection()
     if conn:
-        with conn.cursor() as cur:
-            cur.execute("INSERT INTO users (user_id, first_name, username) VALUES (%s, %s, %s) ON CONFLICT (user_id) DO NOTHING;", (user.id, user.first_name, user.username))
-            conn.commit()
+        with conn.cursor() as cur: cur.execute("INSERT INTO users (user_id, first_name, username) VALUES (%s, %s, %s) ON CONFLICT (user_id) DO NOTHING;", (user.id, user.first_name, user.username)); conn.commit()
         conn.close()
-    
     if not await force_join_middleware(update, context): return
-
     keyboard = [[InlineKeyboardButton("👤 ارتباط با پشتیبان", url=f"https://t.me/{SUPPORT_USERNAME}")], [InlineKeyboardButton("➕ افزودن ربات به گروه", url=f"https://t.me/{(await context.bot.get_me()).username}?startgroup=true")]]
     await update.message.reply_text("سلام! به ربات ما خوش آمدید.", reply_markup=InlineKeyboardMarkup(keyboard))
-
     report_text = f"✅ کاربر جدید: {user.mention_html()} (ID: `{user.id}`)"
     for owner_id in OWNER_IDS:
         try: await context.bot.send_message(chat_id=owner_id, text=report_text, parse_mode=ParseMode.HTML)
@@ -717,7 +536,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await force_join_middleware(update, context): return
-    help_text = "راهنمای ربات 🎮\n\n/hokm - بازی حکم (بزودی)\n/dooz @user - بازی دوز\n/hads_kalame - حدس کلمه\n/hads_addad - حدس عدد\n/type - تایپ سرعتی\n/gharch - پیام ناشناس\n/eteraf - اعتراف ناشناس"
+    help_text = "راهنمای ربات 🎮\n\n/hokm - بازی حکم\n/dooz @user - بازی دوز\n/hads_kalame - حدس کلمه\n/hads_addad - حدس عدد\n/type - تایپ سرعتی\n/gharch - پیام ناشناس\n/eteraf - اعتراف ناشناس"
     await update.message.reply_text(help_text)
 
 # --- دستورات مالک ---
@@ -727,9 +546,7 @@ async def set_start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.message.reply_to_message
     conn = get_db_connection()
     if conn:
-        with conn.cursor() as cur:
-            cur.execute("INSERT INTO start_message (id, message_id, chat_id) VALUES (1, %s, %s) ON CONFLICT (id) DO UPDATE SET message_id = EXCLUDED.message_id, chat_id = EXCLUDED.chat_id;", (msg.message_id, msg.chat_id))
-            conn.commit()
+        with conn.cursor() as cur: cur.execute("INSERT INTO start_message (id, message_id, chat_id) VALUES (1, %s, %s) ON CONFLICT (id) DO UPDATE SET message_id = EXCLUDED.message_id, chat_id = EXCLUDED.chat_id;", (msg.message_id, msg.chat_id)); conn.commit()
         conn.close()
         await update.message.reply_text("✅ پیام خوشامدگویی تنظیم شد.")
 
@@ -772,35 +589,28 @@ async def fwdgroups_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def track_chats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     result, chat, user = update.chat_member, update.effective_chat, update.effective_user
     if not result: return
-    
     is_bot = result.new_chat_member.user.id == context.bot.id
     if not is_bot: return
-
     if result.new_chat_member.status == 'member' and result.old_chat_member.status != 'member':
         conn = get_db_connection()
         if not conn: return
         with conn.cursor() as cur: cur.execute("SELECT COUNT(*) FROM groups;"); group_count = cur.fetchone()[0]
-        
         if group_count >= GROUP_INSTALL_LIMIT:
             await chat.send_message(f"⚠️ ظرفیت نصب این ربات تکمیل شده است! لطفاً با پشتیبانی (@{SUPPORT_USERNAME}) تماس بگیرید.")
             await chat.leave()
             for owner_id in OWNER_IDS: await context.bot.send_message(owner_id, f"🔔 هشدار: سقف نصب ({GROUP_INSTALL_LIMIT}) تکمیل شد. ربات از گروه `{chat.title}` خارج شد.", parse_mode=ParseMode.MARKDOWN)
             return
-        
         member_count = await chat.get_member_count()
         with conn.cursor() as cur: cur.execute("INSERT INTO groups (group_id, title, member_count) VALUES (%s, %s, %s) ON CONFLICT (group_id) DO NOTHING;", (chat.id, chat.title, member_count))
         conn.commit()
         conn.close()
-        
         await chat.send_message("سلام! 👋 من با موفقیت نصب شدم.\nبرای مشاهده لیست بازی‌ها از دستور /help استفاده کنید.")
         report = f"➕ **ربات به گروه جدید اضافه شد:**\n\n🌐 نام: {chat.title}\n🆔: `{chat.id}`\n👥 اعضا: {member_count}\n\n👤 توسط: {user.mention_html()} (ID: `{user.id}`)"
         for owner_id in OWNER_IDS: await context.bot.send_message(owner_id, report, parse_mode=ParseMode.HTML)
-
     elif result.new_chat_member.status == 'left':
         conn = get_db_connection()
         if conn:
-            with conn.cursor() as cur: cur.execute("DELETE FROM groups WHERE group_id = %s;", (chat.id,))
-            conn.commit()
+            with conn.cursor() as cur: cur.execute("DELETE FROM groups WHERE group_id = %s;", (chat.id,)); conn.commit()
             conn.close()
         report = f"❌ **ربات از گروه زیر اخراج شد:**\n\n🌐 نام: {chat.title}\n🆔: `{chat.id}`"
         for owner_id in OWNER_IDS: await context.bot.send_message(owner_id, report, parse_mode=ParseMode.MARKDOWN)
@@ -808,7 +618,6 @@ async def track_chats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 # =================================================================
 # ======================== MAIN FUNCTION ==========================
 # =================================================================
-
 def main() -> None:
     setup_database()
     BOT_TOKEN = os.environ.get("BOT_TOKEN")
@@ -817,8 +626,7 @@ def main() -> None:
         return
 
     application = Application.builder().token(BOT_TOKEN).build()
-
-    # Conversation Handler for Guess the Number
+    
     guess_number_conv = ConversationHandler(
         entry_points=[CommandHandler("hads_addad", hads_addad_command)],
         states={
@@ -826,7 +634,7 @@ def main() -> None:
             GUESSING: [MessageHandler(filters.Regex(r'^[\d۰-۹]+$'), handle_guess_conversation)],
         },
         fallbacks=[CommandHandler('cancel', cancel_game)],
-        per_user=False, per_chat=True, per_message=False
+        per_user=False, per_chat=True
     )
     application.add_handler(guess_number_conv)
 
@@ -835,16 +643,15 @@ def main() -> None:
     application.add_handler(CommandHandler("help", help_command))
 
     # Game Start Commands
+    application.add_handler(CommandHandler("hokm", hokm_command))
+    application.add_handler(CommandHandler("cancel_hokm", cancel_hokm_command))
     application.add_handler(CommandHandler("dooz", dooz_command))
     application.add_handler(CommandHandler("hads_kalame", hads_kalame_command))
     application.add_handler(CommandHandler("type", type_command))
     application.add_handler(CommandHandler("gharch", gharch_command))
     application.add_handler(CommandHandler("eteraf", eteraf_command))
-
+    
     # Placeholders
-    application.add_handler(CommandHandler("hokm", hokm_command))
-    application.add_handler(CommandHandler("cancel_hokm", cancel_hokm_command))
-
     application.add_handler(CommandHandler("top", placeholder_command))
     application.add_handler(CommandHandler("settings", placeholder_command))
 
@@ -858,7 +665,7 @@ def main() -> None:
     application.add_handler(CallbackQueryHandler(hokm_callback, pattern=r'^hokm_'))
     application.add_handler(CallbackQueryHandler(dooz_callback, pattern=r'^dooz_'))
 
-    # Message Handlers for Games (Order is important)
+    # Message Handlers for Games
     application.add_handler(MessageHandler(filters.Regex(r'^[آ-ی]$') & filters.ChatType.GROUPS, handle_letter_guess))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.ChatType.PRIVATE, handle_anonymous_message))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.ChatType.GROUPS, handle_typing_attempt))
@@ -866,7 +673,7 @@ def main() -> None:
     # Chat Member Handler
     application.add_handler(ChatMemberHandler(track_chats, ChatMemberHandler.MY_CHAT_MEMBER))
     
-    logger.info("Bot is starting with FINAL logic...")
+    logger.info("Bot is starting with FINAL, FULLY INTEGRATED logic...")
     application.run_polling()
 
 if __name__ == "__main__":
