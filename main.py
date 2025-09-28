@@ -526,6 +526,11 @@ async def handle_typing_attempt(update: Update, context: ContextTypes.DEFAULT_TY
 # =================================================================
 # ================= OWNER & CORE COMMANDS START ===================
 # =================================================================
+# --------------------------- PLACEHOLDERS & SETTINGS ---------------------------
+async def placeholder_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handles commands that are not yet implemented."""
+    if not await pre_command_check(update, context): return
+    await update.message.reply_text(f"قابلیت `{update.message.text.split()[0]}` در آینده اضافه خواهد شد.", parse_mode=ParseMode.MARKDOWN)
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
