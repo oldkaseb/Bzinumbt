@@ -165,22 +165,29 @@ async def render_hokm_board(game, context: ContextTypes.DEFAULT_TYPE, message=""
     return board
 
 async def hokm_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not await force_join_middleware(update, context): return
+    if not await pre_command_check(update, context): return
     chat_id = update.effective_chat.id
-    if chat_id in active_games.get('hokm', {}):
-        return await update.message.reply_text("یک بازی حکم فعال است. برای لغو: /cancel_hokm")
-    
-    game_state = {"status": "joining", "players": [update.effective_user.id]}
-    active_games['hokm'][chat_id] = game_state
-    keyboard = [[InlineKeyboardButton("Join Game (1/4)", callback_data="hokm_join")]]
-    msg = await update.message.reply_text("بازی حکم شروع شد! منتظر ورود ۴ بازیکن...", reply_markup=InlineKeyboardMarkup(keyboard))
-    game_state["message_id"] = msg.message_id
+    user = update.effective_user
 
-async def cancel_hokm_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat_id = update.effective_chat.id
-    if chat_id in active_games.get('hokm', {}):
-        del active_games['hokm'][chat_id]
-        await update.message.reply_text("بازی حکم با موفقیت لغو شد.")
+    # ایجاد ساختار برای بازی‌های همزمان در یک گروه
+    if chat_id not in active_games['hokm']:
+        active_games['hokm'][chat_id] = {}
+
+    # ارسال پیام و گرفتن آیدی آن به عنوان شناسه بازی
+    msg = await update.message.reply_text("بازی حکم جدید شروع شد! منتظر ورود ۴ بازیکن...")
+    game_id = msg.message_id
+    
+    # ساخت دکمه‌ای که شناسه بازی را با خود حمل می‌کند
+    keyboard = [[InlineKeyboardButton("Join Game (1/4)", callback_data=f"hokm_join_{game_id}")]]
+    await msg.edit_reply_markup(reply_markup=InlineKeyboardMarkup(keyboard))
+
+    # ذخیره وضعیت بازی با شناسه منحصر به فرد
+    game_state = {
+        "status": "joining",
+        "players": [user.id],
+        "message_id": game_id # message_id همان game_id است
+    }
+    active_games['hokm'][chat_id][game_id] = game_state
 
 async def hokm_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query, user, chat_id = update.callback_query, query.from_user, query.message.chat.id
@@ -251,6 +258,76 @@ async def hokm_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         game['hands'][user.id].remove(card_played)
         game['current_trick'].append({'player_id': user.id, 'card': card_played})
         
+ async def hokm_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query, user, chat_id = update.callback_query, query.from_user, query.message.chat.id
+    await query.answer()
+
+    data = query.data.split('_')
+    action, game_id_str = data[1], data[2]
+    game_id = int(game_id_str)
+
+    # پیدا کردن بازی صحیح بر اساس شناسه
+    if chat_id not in active_games.get('hokm', {}) or game_id not in active_games['hokm'][chat_id]:
+        try: await query.edit_message_text("این بازی دیگر فعال نیست.")
+        except: pass
+        return
+
+    game = active_games['hokm'][chat_id][game_id]
+
+    if action == "join":
+        if user.id in game['players']: return
+        if len(game['players']) >= 4: return
+        
+        game['players'].append(user.id)
+        num_players = len(game['players'])
+        
+        if num_players < 4:
+            keyboard = [[InlineKeyboardButton(f"Join Game ({num_players}/4)", callback_data=f"hokm_join_{game_id}")]]
+            await query.edit_message_text(f"بازی حکم! بازیکنان وارد شده: {num_players}/4", reply_markup=InlineKeyboardMarkup(keyboard))
+        else: # Game starts!
+            await query.edit_message_text("بازیکنان کامل شدند! در حال بر زدن و شروع دست اول...")
+            game.update({"status": "choosing_hokm", "teams": {'A': [game['players'][0], game['players'][2]], 'B': [game['players'][1], game['players'][3]]}, "hakem_id": None, "deck": create_deck(), "hands": {pid: [] for pid in game['players']}, "trick_scores": {'A': 0, 'B': 0}, "game_scores": game.get('game_scores', {'A': 0, 'B': 0}), "current_trick": []})
+            for i in range(52):
+                player_id, card = game['players'][i % 4], game['deck'].pop(0)
+                game['hands'][player_id].append(card)
+                if card == 'S14' and game['hakem_id'] is None: game['hakem_id'] = player_id
+            
+            if game['hakem_id'] is None: game['hakem_id'] = game['players'][0]
+            game['turn_index'] = game['players'].index(game['hakem_id'])
+
+            keyboard = [[InlineKeyboardButton(s, callback_data=f"hokm_choose_{game_id}_{s[0]}") for s in ["♠️", "♥️", "♦️", "♣️"]]]
+            await context.bot.send_message(game['hakem_id'], f"شما حاکم این بازی هستید (ID: {game_id}). لطفاً حکم را انتخاب کنید:", reply_markup=InlineKeyboardMarkup(keyboard))
+            await query.edit_message_text(await render_hokm_board(game, context), parse_mode=ParseMode.HTML)
+            
+    elif action == "choose":
+        if user.id != game.get('hakem_id'): return
+        game['hokm_suit'] = data[3]
+        game['status'] = 'playing'
+        try: await query.delete_message()
+        except: pass
+        board_text = await render_hokm_board(game, context, f"حکم {card_to_persian(game['hokm_suit']+'2')[0]} انتخاب شد.")
+        keyboard = [[InlineKeyboardButton("🃏 نمایش/بازی کارت", callback_data=f"hokm_show_{game_id}")]]
+        await context.bot.edit_message_text(chat_id, game['message_id'], board_text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.HTML)
+
+    elif action == "show":
+        if user.id != game['players'][game['turn_index']]: return
+        hand_str = ", ".join([card_to_persian(c) for c in sorted(game['hands'][user.id])])
+        await query.answer(f"کارت‌های شما: {hand_str}", show_alert=True)
+        valid_cards = game['hands'][user.id]
+        if game['current_trick']:
+            start_suit = game['current_trick'][0]['card'][0]
+            cards_of_suit = [c for c in valid_cards if c.startswith(start_suit)]
+            if cards_of_suit: valid_cards = cards_of_suit
+        card_buttons = [InlineKeyboardButton(card_to_persian(c), callback_data=f"hokm_play_{game_id}_{c}") for c in valid_cards]
+        keyboard = [card_buttons[i:i+3] for i in range(0, len(card_buttons), 3)]
+        await query.edit_message_reply_markup(reply_markup=InlineKeyboardMarkup(keyboard))
+        
+    elif action == "play":
+        if user.id != game['players'][game['turn_index']]: return
+        card_played = data[3]
+        game['hands'][user.id].remove(card_played)
+        game['current_trick'].append({'player_id': user.id, 'card': card_played})
+        
         if len(game['current_trick']) == 4:
             start_suit = game['current_trick'][0]['card'][0]
             winning_play = game['current_trick'][0]
@@ -260,11 +337,9 @@ async def hokm_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 elif play['card'][0] == game['hokm_suit'] and winning_play['card'][0] != game['hokm_suit']:
                     winning_play = play
             
-            winner_id = winning_play['player_id']
-            winner_team = 'A' if winner_id in game['teams']['A'] else 'B'
+            winner_id, winner_team = winning_play['player_id'], 'A' if winning_play['player_id'] in game['teams']['A'] else 'B'
             game['trick_scores'][winner_team] += 1
-            game['turn_index'] = game['players'].index(winner_id)
-            game['current_trick'] = []
+            game['turn_index'], game['current_trick'] = game['players'].index(winner_id), []
             
             message = f"برنده این دست: {(await context.bot.get_chat(winner_id)).mention_html()}"
             if game['trick_scores']['A'] == 7 or game['trick_scores']['B'] == 7:
@@ -272,23 +347,21 @@ async def hokm_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 if game['game_scores'][winner_team] == 7:
                     message = f"تیم {winner_team} با امتیاز ۷ برنده کل بازی شد! 🏆"
                     await query.edit_message_text(await render_hokm_board(game, context, message), parse_mode=ParseMode.HTML)
-                    del active_games['hokm'][chat_id]
+                    del active_games['hokm'][chat_id][game_id]
                     return
                 else:
                     message = f"تیم {winner_team} این راند را برد! برای شروع راند بعد از دستور /hokm استفاده کنید."
                     await query.edit_message_text(await render_hokm_board(game, context, message), parse_mode=ParseMode.HTML)
-                    del active_games['hokm'][chat_id]
+                    del active_games['hokm'][chat_id][game_id]
                     return
-
             board_text = await render_hokm_board(game, context, message)
-            keyboard = [[InlineKeyboardButton("🃏 نمایش/بازی کارت", callback_data="hokm_show")]]
+            keyboard = [[InlineKeyboardButton("🃏 نمایش/بازی کارت", callback_data=f"hokm_show_{game_id}")]]
             await query.edit_message_text(board_text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.HTML)
         else:
             game['turn_index'] = (game['turn_index'] + 1) % 4
             board_text = await render_hokm_board(game, context)
-            keyboard = [[InlineKeyboardButton("🃏 نمایش/بازی کارت", callback_data="hokm_show")]]
+            keyboard = [[InlineKeyboardButton("🃏 نمایش/بازی کارت", callback_data=f"hokm_show_{game_id}")]]
             await query.edit_message_text(board_text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.HTML)
-    await query.answer()
 
 # --------------------------- GAME: GUESS THE NUMBER (ConversationHandler) ---------------------------
 SELECTING_RANGE, GUESSING = range(2)
@@ -777,7 +850,6 @@ def main() -> None:
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("hokm", hokm_command))
-    application.add_handler(CommandHandler("cancel_hokm", cancel_hokm_command))
     application.add_handler(CommandHandler("dooz", dooz_command))
     application.add_handler(CommandHandler("hads_kalame", hads_kalame_command))
     application.add_handler(CommandHandler("type", type_command))
