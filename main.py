@@ -766,7 +766,7 @@ def main() -> None:
         return
 
     application = Application.builder().token(BOT_TOKEN).build()
-
+    
     # Conversation Handler for Guess the Number
     guess_number_conv = ConversationHandler(
         entry_points=[CommandHandler("hads_addad", hads_addad_command)],
@@ -806,7 +806,7 @@ def main() -> None:
     application.add_handler(CommandHandler("ban_group", ban_group_command))
     application.add_handler(CommandHandler("unban_group", unban_group_command))
 
-    # --- CallbackQuery Handlers for Buttons (FIXED) ---
+    # CallbackQuery Handlers for Buttons
     application.add_handler(CallbackQueryHandler(hokm_callback, pattern=r'^hokm_'))
     application.add_handler(CallbackQueryHandler(dooz_callback, pattern=r'^dooz_'))
 
@@ -823,4 +823,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
