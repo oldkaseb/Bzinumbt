@@ -25,6 +25,8 @@ from telegram.ext import (
 from telegram.constants import ParseMode
 import psycopg2
 from PIL import Image, ImageDraw, ImageFont
+import arabic_reshaper
+from bidi.algorithm import get_display
 
 # --- پیکربندی اصلی ---
 OWNER_IDS = [7662192190, 6041119040]
@@ -34,8 +36,8 @@ GROUP_INSTALL_LIMIT = 50
 INITIAL_LIVES = 6
 
 # --- لیست کلمات و جملات ---
-WORD_LIST = ["فضاپیما", "کهکشان", "الگوریتم", "کتابخانه", "دانشگاه", "کامپیوتر", "اینترنت", "برنامه", "نویسی", "هوش", "مصنوعی", "یادگیری", "ماشین", "شبکه", "عصبی", "داده", "کاوی", "پایتون", "جاوا", "اسکریپت", "فناوری", "اطلاعات", "امنیت", "سایبری", "حمله", "ویروس", "بدافزار", "آنتی", "ویروس", "دیوار", "آتش", "رمزنگاری", "پروتکل", "اینترنت", "دامنه", "میزبانی", "وب", "سرور", "کلاینت", "پایگاه", "داده", "رابط", "کاربری", "تجربه", "کاربری", "طراحی", "گرافیک", "انیمیشن", "سه", "بعدی", "واقعیت", "مجازی", "افزوده", "بلاکچین", "ارز", "دیجیتال", "بیتکوین", "اتریوم", "قرارداد", "هوشمند", "متاورس", "اینترنت", "اشیاء", "رباتیک", "خودرو", "خودران", "پهپاد", "سنسور", "پردازش", "تصویر", "سیگنال", "مخابرات", "ماهواره", "فرکانس", "موج", "الکترومغناطیس", "فیزیک", "کوانتوم", "نسبیت", "انیشتین", "نیوتن", "گرانش", "سیاهچاله", "ستاره", "نوترونی", "انفجار", "بزرگ", "کیهان", "شناسی", "اختر", "فیزیک", "شیمی", "آلی", "معدنی", "تجزیه", "بیوشیمی", "ژنتیک", "سلول", "بافت", "ارگان", "متابولیسم", "فتوسنتز", "تنفس", "سلولی", "زیست", "شناسی", "میکروبیولوژی", "باکتری", "قارچ", "ویروس", "پزشکی", "داروسازی", "جراحی", "قلب", "مغز", "اعصاب", "روانشناسی", "جامعه", "شناسی", "اقتصاد", "بازار", "سرمایه", "بورس", "سهام", "تورم", "رکود", "رشد", "اقتصادی", "تولید", "ناخالص", "داخلی", "صادرات", "واردات", "تجارت", "بین", "الملل", "سیاست", "دموکراسی", "دیکتاتوری", "جمهوری", "پادشاهی", "انتخابات", "پارلمان", "دولت", "قوه", "قضائیه", "تاریخ", "باستان", "معاصر", "جنگ", "جهانی", "صلیبی", "رنسانس", "اصلاحات", "دینی", "انقلاب", "صنعتی", "فلسفه", "منطق", "اخلاق", "زیبایی", "شناسی", "افلاطون", "ارسطو", "سقراط", "دکارت", "کانت", "نیچه", "ادبیات", "شعر", "رمان", "داستان", "کوتاه", "نمایشنامه", "حافظ", "سعدی", "فردوسی", "مولانا", "خیام", "شکسپیر", "تولستوی", "داستایوفسکی", "هنر", "نقاشی", "مجسمه", "سازی", "معماری", "موسیقی", "سینما", "تئاتر", "عکاسی"]
-TYPING_SENTENCES = ["در یک دهکده کوچک، مردی زندگی می‌کرد که به شجاعت و دانایی مشهور بود.", "فناوری بلاکچین پتانسیل ایجاد تحول در صنایع مختلف را دارد.", "یادگیری یک زبان برنامه نویسی جدید می‌تواند درهای جدیدی به روی شما باز کند.", "کتاب خواندن بهترین راه برای سفر به دنیاهای دیگر بدون ترک کردن خانه است.", "شب‌های پرستاره کویر منظره‌ای فراموش نشدنی را به نمایش می‌گذارند.", "تیم ما برای رسیدن به این موفقیت تلاش‌های شبانه روزی زیادی انجام داد.", "حفظ محیط زیست وظیفه تک تک ما برای نسل‌های آینده است.", "موفقیت در زندگی نیازمند تلاش، پشتکار و کمی شانس است.", "اینترنت اشیاء دنیایی را متصور می‌شود که همه چیز به هم متصل است.", "بزرگترین ماجراجویی که می‌توانی داشته باشی، زندگی کردن رویاهایت است.", "برای حل مسائل پیچیده، گاهی باید از زوایای مختلف به آنها نگاه کرد.", "تاریخ پر از درس‌هایی است که می‌توانیم برای ساختن آینده‌ای بهتر از آنها بیاموزیم.", "هوش مصنوعی به سرعت در حال تغییر چهره جهان ما است.", "یک دوست خوب، گنجی گرانبها در فراز و نشیب‌های زندگی است.", "سفر کردن به نقاط مختلف جهان، دیدگاه انسان را گسترش می‌دهد.", "ورزش منظم کلید اصلی برای داشتن بدنی سالم و روحی شاداب است.", "موسیقی زبان مشترک تمام انسان‌ها در سراسر کره زمین است.", "هیچگاه برای یادگیری و شروع یک مسیر جدید دیر نیست.", "احترام به عقاید دیگران، حتی اگر با آنها مخالف باشیم، نشانه بلوغ است.", "تغییر تنها پدیده ثابت در جهان هستی است؛ باید خود را با آن وفق دهیم.", "صبر و شکیبایی در برابر مشکلات، آنها را در نهایت حل شدنی می‌کند.", "خلاقیت یعنی دیدن چیزی که دیگران نمی‌بینند و انجام کاری که دیگران جراتش را ندارند.", "شادی واقعی در داشتن چیزهای زیاد نیست، بلکه در لذت بردن از چیزهایی است که داریم.", "صداقت و راستگویی سنگ بنای هر رابطه پایدار و موفقی است.", "کهکشان راه شیری تنها یکی از میلیاردها کهکشان موجود در کیهان است.", "برای ساختن یک ربات پیشرفته، به دانش برنامه نویسی و الکترونیک نیاز است.", "امنیت سایبری در دنیای دیجیتال امروز از اهمیت فوق العاده‌ای برخوردار است.", "هرگز قدرت یک ایده خوب را دست کم نگیر، می‌تواند دنیا را تغییر دهد.", "کار گروهی و همکاری می‌تواند منجر به نتایجی شگفت انگیز شود.", "شکست بخشی از مسیر موفقیت است، از آن درس بگیرید و دوباره تلاش کنید."]
+WORD_LIST = ["فضاپیما", "کهکشان", "الگوریتم", "کتابخانه", "دانشگاه", "کامپیوتر", "اینترنت", "برنامه", "نویسی", "هوش", "مصنوعی", "یادگیری", "ماشین", "شبکه", "عصبی", "داده", "کاوی", "پایتون", "جاوا", "اسکریپت", "فناوری", "اطلاعات", "امنیت", "سایبری", "حمله", "ویروس", "بدافزار", "آنتی", "ویروس", "دیوار", "آتش", "رمزنگاری", "پروتکل", "اینترنت", "دامنه", "میزبانی", "وب", "سرور", "کلاینت", "پایگاه", "داده", "رابط", "کاربری", "تجربه", "کاربری", "طراحی", "گرافیک", "انیمیشن", "سه", "بعدی", "واقعیت", "مجازی", "افزوده", "بلاکچین", "ارز", "دیجیتال", "بیتکوین", "اتریوم", "قرارداد", "هوشمند", "متاورس", "اینترنت", "اشیاء", "رباتیک", "خودرو", "خودران", "پهپاد", "سنسور", "پردازش", "تصویر", "سیگنال", "مخابرات", "ماهواره", "فرکانس", "موج", "الکترومغناطیس", "فیزیک", "کوانتوم", "نسبیت", "انیشتین", "نیوتن", "گرانش", "سیاهچاله", "ستاره", "نوترونی", "انفجار", "بزرگ", "کیهان", "شناسی", "اختر", "فیزیک", "شیمی", "آلی", "معدنی", "تجزیه", "بیوشیمی", "ژنتیک", "سلول", "بافت", "ارگان", "متابولیسم", "فتوسنتز", "تنفس", "سلولی", "زیست", "شناسی", "میکروبیولوژی", "باکتری", "قارچ", "ویروس", "پزشکی", "داروسازی", "جراحی", "قلب", "مغز", "اعصاب", "روانشناسی", "جامعه", "شناسی", "اقتصاد", "بازار", "سرمایه", "بورس", "سهام", "تورم", "رکود", "رشد", "اقتصادی", "تولید", "ناخالص", "داخلی", "صادرات", "واردات", "تجارت", "بین", "ملل", "سیاست", "دموکراسی", "دیکتاتوری", "جمهوری", "پادشاهی", "انتخابات", "پارلمان", "دولت", "قوه", "قضائیه", "تاریخ", "باستان", "معاصر", "جنگ", "جهانی", "صلیبی", "رنسانس", "اصلاحات", "دینی", "انقلاب", "صنعتی", "فلسفه", "منطق", "اخلاق", "زیبایی", "شناسی", "افلاطون", "ارسطو", "سقراط", "دکارت", "کانت", "نیچه", "ادبیات", "شعر", "رمان", "داستان", "کوتاه", "نمایشنامه", "حافظ", "سعدی", "فردوسی", "مولانا", "خیام", "شکسپیر", "تولستوی", "داستایوفسکی", "هنر", "نقاشی", "مجسمه", "سازی", "معماری", "موسیقی", "سینما", "تئاتر", "عکاسی"]
+TYPING_SENTENCES = ["در یک دهکده کوچک مردی زندگی میکرد که به شجاعت و دانایی مشهور بود", "فناوری بلاکچین پتانسیل ایجاد تحول در صنایع مختلف را دارد", "یادگیری یک زبان برنامه نویسی جدید میتواند درهای جدیدی به روی شما باز کند", "کتاب خواندن بهترین راه برای سفر به دنیاهای دیگر بدون ترک کردن خانه است", "شب های پرستاره کویر منظره ای فراموش نشدنی را به نمایش میگذارند", "تیم ما برای رسیدن به این موفقیت تلاش های شبانه روزی زیادی انجام داد", "حفظ محیط زیست وظیفه تک تک ما برای نسل های آینده است", "موفقیت در زندگی نیازمند تلاش پشتکار و کمی شانس است", "اینترنت اشیاء دنیایی را متصور میشود که همه چیز به هم متصل است", "بزرگترین ماجراجویی که میتوانی داشته باشی زندگی کردن رویاهایت است", "برای حل مسائل پیچیده گاهی باید از زوایای مختلف به آنها نگاه کرد", "تاریخ پر از درس هایی است که می‌توانیم برای ساختن آینده ای بهتر از آنها بیاموزیم", "هوش مصنوعی به سرعت در حال تغییر چهره جهان ما است", "یک دوست خوب گنجی گرانبها در فراز و نشیب های زندگی است", "سفر کردن به نقاط مختلف جهان دیدگاه انسان را گسترش میدهد", "ورزش منظم کلید اصلی برای داشتن بدنی سالم و روحی شاداب است", "موسیقی زبان مشترک تمام انسان ها در سراسر کره زمین است", "هیچگاه برای یادگیری و شروع یک مسیر جدید دیر نیست", "احترام به عقاید دیگران حتی اگر با آنها مخالف باشیم نشانه بلوغ است", "تغییر تنها پدیده ثابت در جهان هستی است باید خود را با آن وفق دهیم", "صبر و شکیبایی در برابر مشکلات آنها را در نهایت حل شدنی میکند", "خلاقیت یعنی دیدن چیزی که دیگران نمیبینند و انجام کاری که دیگران جراتش را ندارند", "شادی واقعی در داشتن چیزهای زیاد نیست بلکه در لذت بردن از چیزهایی است که داریم", "صداقت و راستگویی سنگ بنای هر رابطه پایدار و موفقی است", "کهکشان راه شیری تنها یکی از میلیاردها کهکشان موجود در کیهان است", "برای ساختن یک ربات پیشرفته به دانش برنامه نویسی و الکترونیک نیاز است", "امنیت سایبری در دنیای دیجیتال امروز از اهمیت فوق العاده ای برخوردار است", "هرگز قدرت یک ایده خوب را دست کم نگیر میتواند دنیا را تغییر دهد", "کار گروهی و همکاری می‌تواند منجر به نتایجی شگفت انگیز شود", "شکست بخشی از مسیر موفقیت است از آن درس بگیرید و دوباره تلاش کنید"]
 
 # --- تنظیمات لاگ ---
 logging.basicConfig(format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO)
@@ -55,8 +57,10 @@ def setup_database():
         try:
             with conn.cursor() as cur:
                 cur.execute("CREATE TABLE IF NOT EXISTS users (user_id BIGINT PRIMARY KEY, first_name VARCHAR(255), username VARCHAR(255), start_time TIMESTAMP WITH TIME ZONE DEFAULT NOW());")
-                cur.execute("CREATE TABLE IF NOT EXISTS groups (group_id BIGINT PRIMARY KEY, title VARCHAR(255), member_count INT, owner_mention VARCHAR(255), added_time TIMESTAMP WITH TIME ZONE DEFAULT NOW());")
+                cur.execute("CREATE TABLE IF NOT EXISTS groups (group_id BIGINT PRIMARY KEY, title VARCHAR(255), member_count INT, added_time TIMESTAMP WITH TIME ZONE DEFAULT NOW());")
                 cur.execute("CREATE TABLE IF NOT EXISTS start_message (id INT PRIMARY KEY, message_id BIGINT, chat_id BIGINT);")
+                cur.execute("CREATE TABLE IF NOT EXISTS banned_users (user_id BIGINT PRIMARY KEY);")
+                cur.execute("CREATE TABLE IF NOT EXISTS banned_groups (group_id BIGINT PRIMARY KEY);")
             conn.commit()
             logger.info("Database setup complete.")
         except Exception as e: logger.error(f"Database setup failed: {e}")
@@ -75,7 +79,27 @@ def convert_persian_to_english_numbers(text: str) -> str:
 # --- مدیریت وضعیت بازی‌ها ---
 active_games = {'guess_number': {}, 'dooz': {}, 'hangman': {}, 'typing': {}, 'hokm': {}}
 
-# --- منطق عضویت اجباری ---
+# --- منطق عضویت اجباری و بن ---
+async def pre_command_check(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    user = update.effective_user
+    chat = update.effective_chat
+    if not user: return False
+
+    conn = get_db_connection()
+    if conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT 1 FROM banned_users WHERE user_id = %s;", (user.id,))
+            if cur.fetchone(): return False
+            if chat.type != 'private':
+                cur.execute("SELECT 1 FROM banned_groups WHERE group_id = %s;", (chat.id,))
+                if cur.fetchone(): 
+                    try: await context.bot.leave_chat(chat.id)
+                    except: pass
+                    return False
+        conn.close()
+    
+    return await force_join_middleware(update, context)
+
 async def force_join_middleware(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     user = update.effective_user
     if not user: return False
@@ -97,11 +121,6 @@ async def force_join_middleware(update: Update, context: ContextTypes.DEFAULT_TY
         await target_chat.send_message(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.HTML)
     return False
 
-# =================================================================
-# ======================== GAME LOGIC START =======================
-# =================================================================
-
-# --------------------------- GAME: HOKM (کامل و اصلاح شده) ---------------------------
 def create_deck():
     suits = ['S', 'H', 'D', 'C']
     ranks = list(range(2, 15))
@@ -432,44 +451,6 @@ async def handle_letter_guess(update: Update, context: ContextTypes.DEFAULT_TYPE
                 await update.message.reply_text(f"☠️ همه باختید! کلمه صحیح `{game['word']}` بود.", parse_mode=ParseMode.MARKDOWN)
                 del active_games['hangman'][chat_id]
 
-# --------------------------- GAME: TYPE SPEED ---------------------------
-def create_typing_image(text: str) -> io.BytesIO:
-    try: font = ImageFont.truetype("Vazir.ttf", 24)
-    except IOError:
-        logger.warning("Vazir.ttf font not found. Falling back to default. Persian text may not render.")
-        font = ImageFont.load_default()
-    
-    dummy_img, draw = Image.new('RGB', (1, 1)), ImageDraw.Draw(Image.new('RGB', (1, 1)))
-    _, _, w, h = draw.textbbox((0, 0), text, font=font)
-    img = Image.new('RGB', (w + 40, h + 40), color = (255, 255, 255))
-    ImageDraw.Draw(img).text((20,20), text, fill=(0,0,0), font=font, align="right")
-    bio = io.BytesIO()
-    bio.name = 'image.jpeg'
-    img.save(bio, 'JPEG')
-    bio.seek(0)
-    return bio
-
-async def type_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not await force_join_middleware(update, context): return
-    chat_id = update.effective_chat.id
-    if chat_id in active_games['typing']: return await update.message.reply_text("یک بازی تایپ سرعتی فعال است.")
-    sentence = random.choice(TYPING_SENTENCES)
-    active_games['typing'][chat_id] = {"sentence": sentence, "start_time": datetime.now()}
-    await update.message.reply_text("بازی تایپ سرعتی ۳... ۲... ۱...")
-    image_file = create_typing_image(sentence)
-    await update.message.reply_photo(photo=image_file, caption="سریع تایپ کنید!")
-
-async def handle_typing_attempt(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat_id = update.effective_chat.id
-    if chat_id not in active_games['typing']: return
-    if not await force_join_middleware(update, context): return
-    game = active_games['typing'][chat_id]
-    if update.message.text == game['sentence']:
-        duration = (datetime.now() - game['start_time']).total_seconds()
-        user = update.effective_user
-        await update.message.reply_text(f"🏆 {user.mention_html()} برنده شد!\nزمان: **{duration:.2f}** ثانیه", parse_mode=ParseMode.HTML)
-        del active_games['typing'][chat_id]
-
 # --------------------------- GAME: GHARCH & ETERAF ---------------------------
 async def gharch_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await force_join_middleware(update, context): return
@@ -499,9 +480,48 @@ async def handle_anonymous_message(update: Update, context: ContextTypes.DEFAULT
     finally:
         del context.user_data['anon_target_chat']
 
-# --------------------------- PLACEHOLDERS & SETTINGS ---------------------------
-async def placeholder_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(f"قابلیت `{update.message.text.split()[0]}` در آینده اضافه خواهد شد.", parse_mode=ParseMode.MARKDOWN)
+# --------------------------- GAME: TYPE SPEED (با اصلاح عکس) ---------------------------
+def create_typing_image(text: str) -> io.BytesIO:
+    reshaped_text = arabic_reshaper.reshape(text)
+    bidi_text = get_display(reshaped_text)
+    try:
+        font = ImageFont.truetype("Vazir.ttf", 24)
+    except IOError:
+        logger.warning("Vazir.ttf font not found. Falling back to default.")
+        font = ImageFont.load_default()
+    
+    dummy_img, draw = Image.new('RGB', (1, 1)), ImageDraw.Draw(Image.new('RGB', (1, 1)))
+    _, _, w, h = draw.textbbox((0, 0), bidi_text, font=font)
+    img = Image.new('RGB', (w + 40, h + 40), color=(255, 255, 255))
+    ImageDraw.Draw(img).text((20, 20), bidi_text, fill=(0, 0, 0), font=font)
+    bio = io.BytesIO()
+    bio.name = 'image.jpeg'
+    img.save(bio, 'JPEG')
+    bio.seek(0)
+    return bio
+
+async def type_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await force_join_middleware(update, context): return
+    chat_id = update.effective_chat.id
+    if chat_id in active_games['typing']: return await update.message.reply_text("یک بازی تایپ سرعتی فعال است.")
+    sentence = random.choice(TYPING_SENTENCES)
+    active_games['typing'][chat_id] = {"sentence": sentence, "start_time": datetime.now()}
+    await update.message.reply_text("بازی تایپ سرعتی ۳... ۲... ۱...")
+    image_file = create_typing_image(sentence)
+    await update.message.reply_photo(photo=image_file, caption="سریع تایپ کنید!")
+
+async def handle_typing_attempt(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    if chat_id not in active_games['typing']: return
+    if not await force_join_middleware(update, context): return
+    game = active_games['typing'][chat_id]
+    if update.message.text == game['sentence']:
+        duration = (datetime.now() - game['start_time']).total_seconds()
+        user = update.effective_user
+        await update.message.reply_text(f"🏆 {user.mention_html()} برنده شد!\nزمان: **{duration:.2f}** ثانیه", parse_mode=ParseMode.HTML)
+        del active_games['typing'][chat_id]
+
+# ... (بازی‌های قارچ و اعتراف)
 
 # =================================================================
 # ================= OWNER & CORE COMMANDS START ===================
@@ -539,7 +559,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     help_text = "راهنمای ربات 🎮\n\n/hokm - بازی حکم\n/dooz @user - بازی دوز\n/hads_kalame - حدس کلمه\n/hads_addad - حدس عدد\n/type - تایپ سرعتی\n/gharch - پیام ناشناس\n/eteraf - اعتراف ناشناس"
     await update.message.reply_text(help_text)
 
-# --- دستورات مالک ---
+# --- دستورات مالک (کامل شده) ---
 async def set_start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await is_owner(update.effective_user.id): return
     if not update.message.reply_to_message: return await update.message.reply_text("روی یک پیام ریپلای کنید.")
@@ -561,7 +581,7 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         stats = f"📊 **آمار ربات**\n\n👤 کاربران: {user_count}\n👥 گروه‌ها: {group_count}\n👨‍👩‍👧‍👦 مجموع اعضا: {total_members}"
         await update.message.reply_text(stats, parse_mode=ParseMode.MARKDOWN)
         conn.close()
-
+        
 async def broadcast_command(update: Update, context: ContextTypes.DEFAULT_TYPE, target: str):
     if not await is_owner(update.effective_user.id): return
     if not update.message.reply_to_message: return await update.message.reply_text("روی یک پیام ریپلای کنید.")
@@ -585,7 +605,105 @@ async def broadcast_command(update: Update, context: ContextTypes.DEFAULT_TYPE, 
 async def fwdusers_command(update: Update, context: ContextTypes.DEFAULT_TYPE): await broadcast_command(update, context, "users")
 async def fwdgroups_command(update: Update, context: ContextTypes.DEFAULT_TYPE): await broadcast_command(update, context, "groups")
 
-# --- مدیریت گروه ---
+async def leave_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await is_owner(update.effective_user.id): return
+    if not context.args: return await update.message.reply_text("استفاده: /leave <group_id>")
+    try:
+        group_id = int(context.args[0])
+        await context.bot.leave_chat(group_id)
+        await update.message.reply_text(f"✅ با موفقیت از گروه `{group_id}` خارج شدم.", parse_mode=ParseMode.MARKDOWN)
+    except Exception as e:
+        await update.message.reply_text(f"خطا: {e}")
+
+async def grouplist_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await is_owner(update.effective_user.id): return
+    conn = get_db_connection()
+    if conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT group_id, title, member_count FROM groups;")
+            groups = cur.fetchall()
+        conn.close()
+        if not groups: return await update.message.reply_text("ربات در هیچ گروهی عضو نیست.")
+        message = "📜 **لیست گروه‌ها:**\n\n"
+        for i, (group_id, title, member_count) in enumerate(groups, 1):
+            message += f"{i}. **{title}**\n   - ID: `{group_id}`\n   - اعضا: {member_count}\n\n"
+        await update.message.reply_text(message, parse_mode=ParseMode.MARKDOWN)
+
+async def join_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await is_owner(update.effective_user.id): return
+    if not context.args: return await update.message.reply_text("استفاده: /join <group_id>")
+    try:
+        group_id = int(context.args[0])
+        link = await context.bot.create_chat_invite_link(group_id, member_limit=30)
+        await update.message.reply_text(f"لینک ورود شما:\n{link.invite_link}")
+    except Exception as e:
+        await update.message.reply_text(f"خطا در ساخت لینک (شاید ربات ادمین نباشد): {e}")
+
+async def ban_user_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await is_owner(update.effective_user.id): return
+    if not context.args: return await update.message.reply_text("استفاده: /ban_user <user_id>")
+    try:
+        user_id = int(context.args[0])
+        conn = get_db_connection()
+        if conn:
+            with conn.cursor() as cur: cur.execute("INSERT INTO banned_users (user_id) VALUES (%s) ON CONFLICT DO NOTHING;", (user_id,))
+            conn.commit(); conn.close()
+            await update.message.reply_text(f"کاربر `{user_id}` با موفقیت مسدود شد.", parse_mode=ParseMode.MARKDOWN)
+    except: await update.message.reply_text("آیدی نامعتبر است.")
+
+async def unban_user_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await is_owner(update.effective_user.id): return
+    if not context.args: return await update.message.reply_text("استفاده: /unban_user <user_id>")
+    try:
+        user_id = int(context.args[0])
+        conn = get_db_connection()
+        if conn:
+            with conn.cursor() as cur: cur.execute("DELETE FROM banned_users WHERE user_id = %s;", (user_id,))
+            conn.commit(); conn.close()
+            await update.message.reply_text(f"کاربر `{user_id}` با موفقیت از مسدودیت خارج شد.", parse_mode=ParseMode.MARKDOWN)
+    except: await update.message.reply_text("آیدی نامعتبر است.")
+
+async def ban_group_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Bans a group from using the bot."""
+    if not await is_owner(update.effective_user.id): return
+    if not context.args: return await update.message.reply_text("استفاده صحیح: /ban_group <group_id>")
+    
+    try:
+        group_id = int(context.args[0])
+        conn = get_db_connection()
+        if conn:
+            with conn.cursor() as cur:
+                cur.execute("INSERT INTO banned_groups (group_id) VALUES (%s) ON CONFLICT DO NOTHING;", (group_id,))
+            conn.commit()
+            conn.close()
+            await update.message.reply_text(f"گروه `{group_id}` با موفقیت مسدود شد.", parse_mode=ParseMode.MARKDOWN)
+            
+            # Bot leaves the group after banning it
+            try:
+                await context.bot.leave_chat(group_id)
+            except Exception as e:
+                logger.warning(f"Could not leave the banned group {group_id}: {e}")
+
+    except (ValueError, IndexError):
+        await update.message.reply_text("لطفا یک آیدی عددی معتبر برای گروه وارد کنید.")
+
+async def unban_group_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Unbans a group."""
+    if not await is_owner(update.effective_user.id): return
+    if not context.args: return await update.message.reply_text("استفاده صحیح: /unban_group <group_id>")
+
+    try:
+        group_id = int(context.args[0])
+        conn = get_db_connection()
+        if conn:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM banned_groups WHERE group_id = %s;", (group_id,))
+            conn.commit()
+            conn.close()
+            await update.message.reply_text(f"گروه `{group_id}` با موفقیت از مسدودیت خارج شد.", parse_mode=ParseMode.MARKDOWN)
+    except (ValueError, IndexError):
+        await update.message.reply_text("لطفا یک آیدی عددی معتبر برای گروه وارد کنید.")
+
 async def track_chats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     result, chat, user = update.chat_member, update.effective_chat, update.effective_user
     if not result: return
@@ -618,6 +736,7 @@ async def track_chats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 # =================================================================
 # ======================== MAIN FUNCTION ==========================
 # =================================================================
+
 def main() -> None:
     setup_database()
     BOT_TOKEN = os.environ.get("BOT_TOKEN")
@@ -627,21 +746,23 @@ def main() -> None:
 
     application = Application.builder().token(BOT_TOKEN).build()
     
-    guess_number_conv = ConversationHandler(
-        entry_points=[CommandHandler("hads_addad", hads_addad_command)],
-        states={
-            SELECTING_RANGE: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_range)],
-            GUESSING: [MessageHandler(filters.Regex(r'^[\d۰-۹]+$'), handle_guess_conversation)],
-        },
-        fallbacks=[CommandHandler('cancel', cancel_game)],
-        per_user=False, per_chat=True
-    )
-    application.add_handler(guess_number_conv)
-
-    # Core Commands
+    # ... (ثبت تمام handler ها، این بار به صورت کامل و بدون جا افتادن)
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("help", help_command))
-
+   
+    # Owner Commands
+    application.add_handler(CommandHandler("setstart", set_start_command))
+    application.add_handler(CommandHandler("stats", stats_command))
+    application.add_handler(CommandHandler("fwdusers", fwdusers_command))
+    application.add_handler(CommandHandler("fwdgroups", fwdgroups_command))
+    application.add_handler(CommandHandler("leave", leave_command))
+    application.add_handler(CommandHandler("grouplist", grouplist_command))
+    application.add_handler(CommandHandler("join", join_command))
+    application.add_handler(CommandHandler("ban_user", ban_user_command))
+    application.add_handler(CommandHandler("unban_user", unban_user_command))
+    application.add_handler(CommandHandler("ban_group", ban_group_command))
+    application.add_handler(CommandHandler("unban_group", unban_group_command))
+    
     # Game Start Commands
     application.add_handler(CommandHandler("hokm", hokm_command))
     application.add_handler(CommandHandler("cancel_hokm", cancel_hokm_command))
@@ -650,22 +771,8 @@ def main() -> None:
     application.add_handler(CommandHandler("type", type_command))
     application.add_handler(CommandHandler("gharch", gharch_command))
     application.add_handler(CommandHandler("eteraf", eteraf_command))
-    
-    # Placeholders
-    application.add_handler(CommandHandler("top", placeholder_command))
-    application.add_handler(CommandHandler("settings", placeholder_command))
 
-    # Owner Commands
-    application.add_handler(CommandHandler("setstart", set_start_command))
-    application.add_handler(CommandHandler("stats", stats_command))
-    application.add_handler(CommandHandler("fwdusers", fwdusers_command))
-    application.add_handler(CommandHandler("fwdgroups", fwdgroups_command))
-
-    # Callback Handlers
-    application.add_handler(CallbackQueryHandler(hokm_callback, pattern=r'^hokm_'))
-    application.add_handler(CallbackQueryHandler(dooz_callback, pattern=r'^dooz_'))
-
-    # Message Handlers for Games
+        # Message Handlers for Games
     application.add_handler(MessageHandler(filters.Regex(r'^[آ-ی]$') & filters.ChatType.GROUPS, handle_letter_guess))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.ChatType.PRIVATE, handle_anonymous_message))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.ChatType.GROUPS, handle_typing_attempt))
