@@ -570,18 +570,26 @@ async def cancel_game(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
 
 # --------------------------- GAME: DOOZ (TIC-TAC-TOE) ---------------------------
 async def dooz_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not await force_join_middleware(update, context): return
-    if update.effective_chat.type == 'private': return await update.message.reply_text("این بازی فقط در گروه‌ها قابل اجراست.")
-    
+    if not await force_join_middleware(update, context): 
+        return
+    if update.effective_chat.type == 'private':
+        await update.message.reply_text("این بازی فقط در گروه‌ها قابل اجراست.")
+        return
+        
     challenger, challenged_user = update.effective_user, None
     if update.message.reply_to_message:
         challenged_user = update.message.reply_to_message.from_user
-        if challenged_user.is_bot: return await update.message.reply_text("شما نمی‌توانید ربات‌ها را به بازی دعوت کنید!")
-        if challenged_user.id == challenger.id: return await update.message.reply_text("شما نمی‌توانید خودتان را به بازی دعوت کنید!")
+        if challenged_user.is_bot:
+            await update.message.reply_text("شما نمی‌توانید ربات‌ها را به بازی دعوت کنید!")
+            return
+        if challenged_user.id == challenger.id:
+            await update.message.reply_text("شما نمی‌توانید خودتان را به بازی دعوت کنید!")
+            return
     elif context.args and context.args[0].startswith('@'):
         pass
     else:
-        return await update.message.reply_text("برای دعوت، یا روی پیام یک نفر ریپلای کنید یا او را منشن کنید. (`/dooz @username`)")
+        await update.message.reply_text("برای دعوت، یا روی پیام یک نفر ریپلای کنید یا او را منشن کنید. (`/dooz @username`)")
+        return
 
     if challenged_user:
         challenged_mention = challenged_user.mention_html()
@@ -598,73 +606,113 @@ async def dooz_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.HTML)
 
 async def dooz_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query, user = update.callback_query, query.from_user
+    query = update.callback_query
+    user = query.from_user
     await query.answer()
-    if not await force_join_middleware(update, context): return
+    if not await force_join_middleware(update, context): 
+        return
     
     data = query.data.split('_')
-    action, p1_id, p2_info = data[1], int(data[2]), data[3]
+    action = data[1]
 
     if action in ["accept", "decline"]:
-        is_correct_user = (user.username == p2_info) or (str(user.id) == p2_info)
-        if not is_correct_user: return await query.answer("این دعوت برای شما نیست!", show_alert=True)
-        if user.id == p1_id and action == "accept": return await query.answer("شما نمی‌توانید دعوت خودتان را قبول کنید!", show_alert=True)
+        p1_id, p2_info = int(data[2]), data[3]
+        is_correct_user = (user.username and user.username.lower() == p2_info.lower()) or (str(user.id) == p2_info)
         
-        p1_mention = (await context.bot.get_chat(p1_id)).mention_html()
+        if not is_correct_user:
+            await query.answer("این دعوت برای شما نیست!", show_alert=True)
+            return
+        if user.id == p1_id and action == "accept":
+            await query.answer("شما نمی‌توانید دعوت خودتان را قبول کنید!", show_alert=True)
+            return
+        
+        try:
+            p1_user = await context.bot.get_chat(p1_id)
+            p1_mention = p1_user.mention_html()
+        except:
+            p1_mention = f"کاربر {p1_id}"
+
         if action == "accept":
-    chat_id = query.message.chat.id
-    game_id = query.message.message_id # از آیدی پیام به عنوان شناسه بازی استفاده می‌کنیم
+            chat_id = query.message.chat.id
+            game_id = query.message.message_id
 
-    if chat_id not in active_games['dooz']:
-        active_games['dooz'][chat_id] = {}
+            if chat_id not in active_games['dooz']:
+                active_games['dooz'][chat_id] = {}
 
-    active_games['dooz'][chat_id][game_id] = {
-        "players": {p1_id: "❌", user.id: "⭕️"},
-        "board": [[" "]*3 for _ in range(3)],
-        "turn": p1_id
-    }
+            active_games['dooz'][chat_id][game_id] = {
+                "players": {p1_id: "❌", user.id: "⭕️"},
+                "board": [[" "]*3 for _ in range(3)],
+                "turn": p1_id
+            }
 
-    text = f"بازی شروع شد!\n{p1_mention} (❌) vs {user.mention_html()} (⭕️)\n\nنوبت {p1_mention} است."
-    
-    # game_id به callback_data دکمه‌ها اضافه می‌شود
-    keyboard = [[
-        InlineKeyboardButton(" ", callback_data=f"dooz_move_{game_id}_{r*3+c}_{p1_id}_{user.id}") 
-        for c in range(3)] for r in range(3)
-    ]
-    await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.HTML)
-        else: await query.edit_message_text(f"{user.mention_html()} دعوت {p1_mention} را رد کرد.", parse_mode=ParseMode.HTML)
+            text = f"بازی شروع شد!\n{p1_mention} (❌) vs {user.mention_html()} (⭕️)\n\nنوبت {p1_mention} است."
+            
+            keyboard = [[
+                InlineKeyboardButton(" ", callback_data=f"dooz_move_{game_id}_{r*3+c}_{p1_id}_{user.id}") 
+                for c in range(3)] for r in range(3)
+            ]
+            await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.HTML)
+        else:
+            await query.edit_message_text(f"{user.mention_html()} دعوت {p1_mention} را رد کرد.", parse_mode=ParseMode.HTML)
 
     elif action == "move":
-    chat_id = query.message.chat.id
-    game_id = int(data[2])
-    p1_id = int(data[4])
-    p2_id = int(data[5])
+        chat_id = query.message.chat.id
+        game_id = int(data[2])
+        p1_id = int(data[4])
+        p2_id = int(data[5])
 
-    if chat_id not in active_games['dooz'] or game_id not in active_games['dooz'][chat_id]:
-        return await query.answer("این بازی تمام شده است.", show_alert=True)
-    
-    game = active_games['dooz'][chat_id][game_id]
-        if user.id not in [p1_id, p2_id]: return await query.answer("شما بازیکن این مسابقه نیستید!", show_alert=True)
-        if user.id != game['turn']: return await query.answer("نوبت شما نیست!", show_alert=True)
+        if chat_id not in active_games['dooz'] or game_id not in active_games['dooz'][chat_id]:
+            await query.answer("این بازی تمام شده است.", show_alert=True)
+            return
+        
+        game = active_games['dooz'][chat_id][game_id]
+        if user.id not in [p1_id, p2_id]:
+            await query.answer("شما بازیکن این مسابقه نیستید!", show_alert=True)
+            return
+        if user.id != game['turn']:
+            await query.answer("نوبت شما نیست!", show_alert=True)
+            return
 
-        row, col = divmod(int(data[2]), 3)
-        if game['board'][row][col] != " ": return await query.answer("این خانه پر شده!", show_alert=True)
+        cell_index = int(data[3])
+        row, col = divmod(cell_index, 3)
+        if game['board'][row][col] != " ":
+            await query.answer("این خانه پر شده است!", show_alert=True)
+            return
         
         symbol = game['players'][user.id]
         game['board'][row][col] = symbol
         
         b = game['board']
-        win = any(all(c==symbol for c in r) for r in b) or any(all(b[r][c]==symbol for r in range(3)) for c in range(3)) or all(b[i][i]==symbol for i in range(3)) or all(b[i][2-i]==symbol for i in range(3))
-        winner = "draw" if all(c!=" " for r in b for c in r) and not win else user.id if win else None
+        win = any(all(c==symbol for c in r) for r in b) or \
+              any(all(b[r][c]==symbol for r in range(3)) for c in range(3)) or \
+              all(b[i][i]==symbol for i in range(3)) or \
+              all(b[i][2-i]==symbol for i in range(3))
+        
+        is_draw = all(c!=" " for r in b for c in r) and not win
+        winner = user.id if win else "draw" if is_draw else None
         
         game['turn'] = p2_id if user.id == p1_id else p1_id
-        keyboard = [[InlineKeyboardButton(c, callback_data=f"dooz_move_{game_id}_{r*3+i}_{p1_id}_{p2_id}") for i, c in enumerate(row)] for r, row in enumerate(b)]
+        
+        board_rows = []
+        for r in range(3):
+            row_buttons = []
+            for c in range(3):
+                row_buttons.append(InlineKeyboardButton(b[r][c], callback_data=f"dooz_move_{game_id}_{r*3+c}_{p1_id}_{p2_id}"))
+            board_rows.append(row_buttons)
+
         if winner:
-            text = "بازی مساوی شد!" if winner=="draw" else f"بازی تمام شد! برنده: {user.mention_html()} 🏆"
-            del active_games['dooz'][chat_id]
+            text = "بازی مساوی شد!" if winner == "draw" else f"بازی تمام شد! برنده: {user.mention_html()} 🏆"
+            del active_games['dooz'][chat_id][game_id]
+            if not active_games['dooz'][chat_id]:
+                del active_games['dooz'][chat_id]
         else:
-            text = f"نوبت {(await context.bot.get_chat(game['turn'])).mention_html()} است."
-        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.HTML)
+            try:
+                p_turn_user = await context.bot.get_chat(game['turn'])
+                text = f"نوبت {p_turn_user.mention_html()} است."
+            except:
+                text = f"نوبت بازیکن بعدی است."
+        
+        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(board_rows), parse_mode=ParseMode.HTML)
 
 # --------------------------- GAME: HADS KALAME (با جان جداگانه) ---------------------------
 async def hads_kalame_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
