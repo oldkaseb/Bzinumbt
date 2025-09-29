@@ -805,46 +805,52 @@ async def placeholder_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     if not await pre_command_check(update, context): return
     await update.message.reply_text(f"قابلیت `{update.message.text.split()[0]}` در آینده اضافه خواهد شد.", parse_mode=ParseMode.MARKDOWN)
 
+# ======================= این تابع را جایگزین کنید =======================
+# ======================= این تابع را به طور کامل جایگزین کنید =======================
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     chat_id = update.effective_chat.id
 
-    # این بخش برای لینک‌های ناشناس (قارچ و اعتراف) است و باید بماند
+    # --- بخش ۱: مدیریت لینک‌های ورودی (Deep Linking) ---
     if context.args:
         try:
             payload = context.args[0]
             parts = payload.split('_')
             game_type, target_chat_id = parts[0], int(parts[1])
+
             if game_type == "gharch":
                 if target_chat_id in active_gharch_games:
                     god_username = active_gharch_games[target_chat_id]['god_username']
                     context.user_data['anon_target_chat'] = {'id': target_chat_id, 'type': game_type}
-                    prompt = (
-                        f"پیام خود را برای ارسال ناشناس بنویسید...\n\n"
-                        f"توجه: فقط گاد بازی ({god_username}) هویت شما را خواهد دید."
-                    )
+                    prompt = f"پیام خود را برای ارسال ناشناس بنویسید...\n\nتوجه: فقط گاد بازی ({god_username}) هویت شما را خواهد دید."
                     await update.message.reply_text(prompt)
                     return
                 else:
-                    await update.message.reply_text("این بازی قارچ دیگر فعال نیست.")
-                    return
-        except (ValueError, IndexError):
-            pass
+                    await update.message.reply_text("این بازی قارچ دیگر فعال نیست."); return
+            
+            elif game_type == "eteraf":
+                context.user_data['anon_target_chat'] = {'id': target_chat_id, 'type': game_type}
+                if len(parts) > 2:
+                    context.user_data['anon_target_chat']['reply_to'] = int(parts[2])
+                prompt = "اعتراف خود را بنویسید تا به صورت ناشناس در گروه ارسال شود..."
+                await update.message.reply_text(prompt)
+                return
 
-    # ذخیره کاربر در دیتابیس
+        except (ValueError, IndexError):
+            pass # اگر payload معتبر نبود، به بخش استارت معمولی می‌رود
+
+    # --- بخش ۲: منطق استارت معمولی ---
     conn = get_db_connection()
     if conn:
-        with conn.cursor() as cur:
+        with conn.cursor() as cur: 
             cur.execute("INSERT INTO users (user_id, first_name, username) VALUES (%s, %s, %s) ON CONFLICT (user_id) DO NOTHING;", (user.id, user.first_name, user.username))
             conn.commit()
-
-    # چک کردن عضویت اجباری
+    
     if not await force_join_middleware(update, context):
         if conn: conn.close()
         return
 
-    # <<<--- شروع تغییرات اصلی --->>>
-    # ساخت دکمه‌ها
+    # --- بخش ۳: ارسال پیام خوشامدگویی (سفارشی یا پیش‌فرض) ---
     keyboard = [
         [InlineKeyboardButton("➕ افزودن ربات به گروه", url=f"https://t.me/{(await context.bot.get_me()).username}?startgroup=true")],
         [InlineKeyboardButton("👤 ارتباط با پشتیبان", url=f"https://t.me/{SUPPORT_USERNAME}")]
@@ -859,30 +865,22 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 start_msg_data = cur.fetchone()
                 if start_msg_data:
                     message_id, from_chat_id = start_msg_data
-                    # ارسال پیام سفارشی به همراه دکمه‌ها
-                    await context.bot.copy_message(
-                        chat_id=chat_id,
-                        from_chat_id=from_chat_id,
-                        message_id=message_id,
-                        reply_markup=reply_markup
-                    )
+                    await context.bot.copy_message(chat_id=chat_id, from_chat_id=from_chat_id, message_id=message_id, reply_markup=reply_markup)
                     custom_welcome_sent = True
         except Exception as e:
             logger.error(f"Could not send custom start message in PV: {e}")
         finally:
             conn.close()
 
-    # اگر پیام سفارشی وجود نداشت یا ارسال نشد، پیام پیش‌فرض را بفرست
     if not custom_welcome_sent:
         await update.message.reply_text("سلام! به ربات ما خوش آمدید.", reply_markup=reply_markup)
-    # <<<--- پایان تغییرات اصلی --->>>
-
+    
     # ارسال گزارش به ادمین‌ها
     report_text = f"✅ کاربر جدید: {user.mention_html()} (ID: `{user.id}`)"
     for owner_id in OWNER_IDS:
         try:
             await context.bot.send_message(chat_id=owner_id, text=report_text, parse_mode=ParseMode.HTML)
-        except Exception:
+        except:
             pass
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1113,6 +1111,7 @@ async def track_chats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 # ======================== MAIN FUNCTION ==========================
 # =================================================================
 
+# ======================= این تابع را نیز به طور کامل جایگزین کنید =======================
 def main() -> None:
     """Start the bot."""
     setup_database()
@@ -1123,7 +1122,20 @@ def main() -> None:
 
     application = Application.builder().token(BOT_TOKEN).build()
     
-    # Conversation Handler for Guess the Number
+    # --- اولویت ۱: Conversation Handlers ---
+    # این‌ها باید اول ثبت شوند تا پیام‌ها را قبل از handler های عمومی دریافت کنند.
+    
+    gharch_conv_handler = ConversationHandler(
+        entry_points=[CommandHandler("gharch", gharch_command)],
+        states={
+            ASKING_GOD_USERNAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_god_username)],
+            CONFIRMING_GOD: [CallbackQueryHandler(confirm_god, pattern=r'^gharch_confirm_god_')],
+        },
+        fallbacks=[CommandHandler('cancel', cancel_gharch)],
+        per_user=False, per_chat=True,
+    )
+    application.add_handler(gharch_conv_handler)
+    
     guess_number_conv = ConversationHandler(
         entry_points=[CommandHandler("hads_addad", hads_addad_command)],
         states={
@@ -1135,21 +1147,23 @@ def main() -> None:
     )
     application.add_handler(guess_number_conv)
 
-    # Core & Game Start Commands
+    # --- اولویت ۲: Command Handlers (تمام دستورات) ---
+    # دستورات اصلی
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("help", help_command))
+    
+    # دستورات بازی
     application.add_handler(CommandHandler("hokm", hokm_command))
     application.add_handler(CommandHandler("dooz", dooz_command))
     application.add_handler(CommandHandler("hads_kalame", hads_kalame_command))
     application.add_handler(CommandHandler("type", type_command))
-    application.add_handler(CommandHandler("gharch", gharch_command))
     application.add_handler(CommandHandler("eteraf", eteraf_command))
     
-    # Placeholder Commands
+    # دستورات جایگزین (Placeholder)
     application.add_handler(CommandHandler("top", placeholder_command))
     application.add_handler(CommandHandler("settings", placeholder_command))
 
-    # Owner Commands
+    # دستورات مالک ربات
     application.add_handler(CommandHandler("setstart", set_start_command))
     application.add_handler(CommandHandler("stats", stats_command))
     application.add_handler(CommandHandler("fwdusers", fwdusers_command))
@@ -1162,35 +1176,21 @@ def main() -> None:
     application.add_handler(CommandHandler("ban_group", ban_group_command))
     application.add_handler(CommandHandler("unban_group", unban_group_command))
 
-    # CallbackQuery Handlers for Buttons
+    # --- اولویت ۳: CallbackQuery Handlers ---
     application.add_handler(CallbackQueryHandler(hokm_callback, pattern=r'^hokm_'))
     application.add_handler(CallbackQueryHandler(dooz_callback, pattern=r'^dooz_'))
+    # CallbackQuery برای بازی قارچ در ConversationHandler آن مدیریت می‌شود
 
-    # Message Handlers for Game Inputs
+    # --- اولویت ۴: Message Handlers (عمومی) ---
+    # این‌ها باید تقریباً در آخر باشند تا در کار بقیه دخالت نکنند
     application.add_handler(MessageHandler(filters.Regex(r'^[آ-ی]$') & filters.ChatType.GROUPS, handle_letter_guess))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.ChatType.PRIVATE, handle_anonymous_message))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.ChatType.GROUPS, handle_typing_attempt))
-
-    gharch_conv_handler = ConversationHandler(
-        entry_points=[CommandHandler("gharch", gharch_command)],
-        states={
-            ASKING_GOD_USERNAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_god_username)],
-            CONFIRMING_GOD: [CallbackQueryHandler(confirm_god, pattern=r'^gharch_confirm_god_')],
-        },
-        fallbacks=[CommandHandler('cancel', cancel_gharch)],
-        per_user=False, # مکالمه در سطح چت گروه مدیریت می‌شود
-        per_chat=True,
-    )
-    application.add_handler(gharch_conv_handler)
-    # <<<--- پایان بلاک --->>>
-
-    # ... بقیه handler های شما ...
-    application.add_handler(CommandHandler("start", start_command))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.ChatType.PRIVATE, handle_anonymous_message))
-    # Chat Member Handler
+    
+    # --- اولویت ۵: سایر Handler ها ---
     application.add_handler(ChatMemberHandler(track_chats, ChatMemberHandler.MY_CHAT_MEMBER))
     
-    logger.info("Bot is starting with FINAL, FULLY INTEGRATED logic...")
+    logger.info("Bot is starting with final and corrected logic...")
     application.run_polling()
 
 if __name__ == "__main__":
