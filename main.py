@@ -582,6 +582,9 @@ async def handle_letter_guess(update: Update, context: ContextTypes.DEFAULT_TYPE
 # ======================= GAME: GHARCH (نسخه جدید با گاد) =======================
 
 # --- مرحله اول: شروع بازی و درخواست یوزرنیم گاد ---
+# ======================= این دو تابع را به طور کامل جایگزین کنید =======================
+
+# --- مرحله اول: شروع بازی، ارسال پیام اولیه و ذخیره آیدی آن ---
 async def gharch_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """شروع فرآیند بازی قارچ و ورود به حالت مکالمه."""
     if not await pre_command_check(update, context): return ConversationHandler.END
@@ -589,7 +592,6 @@ async def gharch_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await update.message.reply_text("این بازی فقط در گروه‌ها قابل اجراست.")
         return ConversationHandler.END
         
-    # فقط ادمین‌ها می‌توانند بازی را شروع کنند
     if not await is_group_admin(update.effective_user.id, update.effective_chat.id, context):
         await update.message.reply_text("❌ فقط ادمین‌های گروه می‌توانند این بازی را شروع کنند.")
         return ConversationHandler.END
@@ -597,33 +599,53 @@ async def gharch_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     # ذخیره آیدی ادمین شروع کننده
     context.chat_data['starter_admin_id'] = update.effective_user.id
     
-    await update.message.reply_text(
+    # <<<--- تغییر اصلی: ارسال پیام و ذخیره آیدی آن --->>>
+    sent_message = await update.message.reply_text(
         "🍄 **شروع بازی قارچ**\n\n"
         "لطفاً یوزرنیم گاد بازی را ارسال کنید (مثال: @GodUsername)."
     )
+    context.chat_data['gharch_setup_message_id'] = sent_message.message_id
+    
     return ASKING_GOD_USERNAME
 
-# --- مرحله دوم: دریافت یوزرنیم و ارسال درخواست تایید به گاد ---
+# --- مرحله دوم: دریافت یوزرنیم، حذف پیام ادمین و ویرایش پیام اصلی ---
 async def receive_god_username(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """دریافت یوزرنیم گاد و ارسال پیام تایید."""
+    """دریافت یوزرنیم گاد، حذف پیام و ویرایش پیام اولیه."""
     god_username = update.message.text.strip()
     if not god_username.startswith('@'):
-        await update.message.reply_text("فرمت اشتباه است. لطفاً یوزرنیم را با @ ارسال کنید.")
+        await update.message.reply_text("فرمت اشتباه است. لطفاً یوزرنیم را با @ ارسال کنید.", quote=True)
         return ASKING_GOD_USERNAME
 
     context.chat_data['god_username'] = god_username
     starter_admin_id = context.chat_data['starter_admin_id']
+    setup_message_id = context.chat_data.get('gharch_setup_message_id')
+
+    # <<<--- تغییر اصلی: حذف پیام حاوی یوزرنیم --->>>
+    try:
+        await update.message.delete()
+    except Exception as e:
+        logger.warning(f"Could not delete admin's username message: {e}")
+
+    if not setup_message_id:
+        await context.bot.send_message(update.effective_chat.id, "خطایی در یافتن پیام اصلی رخ داد. لطفاً بازی را با /cancel لغو و مجدداً شروع کنید.")
+        return ConversationHandler.END
 
     keyboard = [[
         InlineKeyboardButton("✅ تایید می‌کنم", callback_data=f"gharch_confirm_god_{starter_admin_id}")
     ]]
     
-    await update.message.reply_text(
-        f"{god_username} عزیز،\n"
-        f"شما به عنوان گاد بازی قارچ انتخاب شدید. لطفاً برای شروع بازی، این مسئولیت را تایید کنید.\n\n"
-        f"⚠️ **نکته:** برای دریافت گزارش‌ها، باید ربات را استارت کرده باشید. /start",
+    # <<<--- تغییر اصلی: ویرایش پیام اولیه به جای ارسال پیام جدید --->>>
+    await context.bot.edit_message_text(
+        chat_id=update.effective_chat.id,
+        message_id=setup_message_id,
+        text=(
+            f"{god_username} عزیز،\n"
+            f"شما به عنوان گاد بازی قارچ انتخاب شدید. لطفاً برای شروع بازی، این مسئولیت را تایید کنید.\n\n"
+            f"⚠️ **نکته:** برای دریافت گزارش‌ها، باید ربات را استارت کرده باشید. /start"
+        ),
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
+    
     return CONFIRMING_GOD
 
 # --- مرحله سوم: تایید نهایی گاد و شروع بازی ---
