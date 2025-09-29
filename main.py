@@ -78,8 +78,8 @@ def convert_persian_to_english_numbers(text: str) -> str:
     return text.translate(str.maketrans("۰۱۲۳۴۵۶۷۸۹", "0123456789"))
 
 # --- مدیریت وضعیت بازی‌ها ---
-active_games = {'guess_number': {}, 'dooz': {}, 'hangman': {}, 'typing': {}, 'hokm': {},'active_gharch_games' : {}}
-
+active_games = {'guess_number': {}, 'dooz': {}, 'hangman': {}, 'typing': {}, 'hokm': {}}
+active_gharch_games = {}
 # --- منطق عضویت اجباری و بن ---
 async def pre_command_check(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     user = update.effective_user
