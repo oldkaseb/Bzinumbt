@@ -650,51 +650,64 @@ async def receive_god_username(update: Update, context: ContextTypes.DEFAULT_TYP
 
 # --- مرحله سوم: تایید نهایی گاد و شروع بازی ---
 # ======================= فقط این تابع را به طور کامل جایگزین کنید =======================
+# ======================= این تابع را به طور کامل جایگزین کنید =======================
 async def confirm_god(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """گاد بازی را تایید کرده و بازی رسماً شروع می‌شود."""
+    """گاد بازی را تایید کرده و بازی رسماً شروع می‌شود. (نسخه مقاوم در برابر خطای پین)"""
     query = update.callback_query
     user = query.from_user
     chat_id = query.message.chat.id
     
-    starter_admin_id = int(query.data.split('_')[3])
     god_username_from_admin = context.chat_data.get('god_username', '').lower().lstrip('@')
 
-    # <<<--- شروع تغییرات اصلی (شرط امنیتی جدید و قوی‌تر) --->>>
-    # چک می‌کنیم که کاربر کلیک‌کننده حتما یوزرنیم داشته باشد و یوزرنیم او با چیزی که ادمین وارد کرده مطابقت داشته باشد
     if not user.username or user.username.lower() != god_username_from_admin:
         await query.answer("این درخواست برای شما نیست، یا یوزرنیم تلگرام شما تنظیم نشده است.", show_alert=True)
-        return CONFIRMING_GOD # در همین مرحله باقی می‌ماند تا گاد اصلی کلیک کند
-    # <<<--- پایان تغییرات اصلی --->>>
+        return CONFIRMING_GOD
 
     await query.answer("شما به عنوان گاد تایید شدید!")
-    
-    # حالا که هویت گاد تایید شده، اطلاعات نهایی را ذخیره می‌کنیم
-    god_id = user.id
-    god_username_display = f"@{user.username}"
-    active_gharch_games[chat_id] = {'god_id': god_id, 'god_username': god_username_display}
 
-    # متن و دکمه جدید برای پیام اصلی بازی را تعریف می‌کنیم
-    bot_username = (await context.bot.get_me()).username
-    game_message_text = (
-        "**بازی قارچ 🍄 شروع شد!**\n\n"
-        "روی دکمه زیر کلیک کن و حرف دلت رو بنویس تا به صورت ناشناس در گروه ظاهر بشه!\n\n"
-        f"*(فقط گاد بازی، {god_username_display}، از هویت ارسال‌کننده مطلع خواهد شد.)*"
-    )
-    keyboard = [[InlineKeyboardButton("🍄 ارسال پیام ناشناس", url=f"https://t.me/{bot_username}?start=gharch_{chat_id}")]]
-    
-    # همان پیام فعلی را ویرایش می‌کنیم
-    await query.edit_message_text(
-        text=game_message_text,
-        reply_markup=InlineKeyboardMarkup(keyboard),
-        parse_mode=ParseMode.MARKDOWN
-    )
-    
-    # پیام ویرایش‌شده را پین می‌کنیم
     try:
-        await context.bot.pin_chat_message(chat_id, query.message.message_id)
-        active_gharch_games[chat_id]['pinned_message_id'] = query.message.message_id
+        # اطلاعات گاد را ذخیره می‌کنیم
+        god_id = user.id
+        god_username_display = f"@{user.username}"
+        active_gharch_games[chat_id] = {'god_id': god_id, 'god_username': god_username_display}
+
+        # متن و دکمه جدید برای پیام اصلی بازی را تعریف می‌کنیم
+        bot_username = (await context.bot.get_me()).username
+        game_message_text = (
+            "**بازی قارچ 🍄 شروع شد!**\n\n"
+            "روی دکمه زیر کلیک کن و حرف دلت رو بنویس تا به صورت ناشناس در گروه ظاهر بشه!\n\n"
+            f"*(فقط گاد بازی، {god_username_display}، از هویت ارسال‌کننده مطلع خواهد شد.)*"
+        )
+        keyboard = [[InlineKeyboardButton("🍄 ارسال پیام ناشناس", url=f"https://t.me/{bot_username}?start=gharch_{chat_id}")]]
+        
+        # پیام را با موفقیت ویرایش می‌کنیم و بازی رسماً ساخته می‌شود
+        await query.edit_message_text(
+            text=game_message_text,
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode=ParseMode.MARKDOWN
+        )
+        
+        # <<<--- شروع تغییرات اصلی (جدا کردن منطق پین) --->>>
+        # حالا تلاش می‌کنیم پیام را پین کنیم، اما اگر نشد هم مشکلی نیست
+        try:
+            await context.bot.pin_chat_message(chat_id, query.message.message_id)
+            active_gharch_games[chat_id]['pinned_message_id'] = query.message.message_id
+        except Exception as pin_error:
+            # اگر ربات دسترسی پین نداشت، فقط یک لاگ ثبت می‌کند و یک پیام راهنما می‌فرستد
+            logger.warning(f"Could not pin message in group {chat_id}. Reason: {pin_error}")
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text="✅ بازی با موفقیت شروع شد. ادمین‌های عزیز، لطفاً این پیام را پین کنید.",
+                reply_to_message_id=query.message.message_id
+            )
+        # <<<--- پایان تغییرات اصلی --->>>
+
     except Exception as e:
-        logger.error(f"Failed to pin message in gharch game: {e}")
+        # این بخش برای خطاهای بسیار جدی و غیرمنتظره در ساخت بازی است
+        error_message = f"🚫 **خطای ناشناخته!**\n\nربات در ساخت بازی با یک خطای غیرمنتظره مواجه شد: `{e}`"
+        await context.bot.send_message(chat_id=chat_id, text=error_message, parse_mode=ParseMode.MARKDOWN)
+        logger.error(f"CRITICAL ERROR in confirm_god: {e}")
+        return ConversationHandler.END
 
     return ConversationHandler.END
 
