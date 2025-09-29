@@ -908,11 +908,47 @@ async def cancel_gharch(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     return ConversationHandler.END
 
 async def eteraf_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not await force_join_middleware(update, context): return
-    chat_id, bot_username = update.effective_chat.id, (await context.bot.get_me()).username
-    starter_message = await update.message.reply_text("یک موضوع اعتراف جدید شروع شد. برای ارسال اعتراف ناشناس (که به این پیام ریپلای می‌شود)، از دکمه زیر استفاده کنید.")
-    keyboard = [[InlineKeyboardButton("🤫 ارسال اعتراف", url=f"https://t.me/{bot_username}?start=eteraf_{chat_id}_{starter_message.message_id}")]]
-    await starter_message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(keyboard))
+    """
+    دستور شروع اعتراف ناشناس که فقط توسط ادمین‌ها قابل اجراست.
+    حالت اول: /eteraf (با متن پیش‌فرض)
+    حالت دوم: /eteraf متن دلخواه شما (با متن سفارشی)
+    """
+    # مرحله ۱: بررسی اینکه دستور در گروه اجرا شده باشد
+    if update.effective_chat.type == 'private':
+        await update.message.reply_text("این دستور فقط در گروه‌ها قابل استفاده است.")
+        return
+
+    # مرحله ۲: بررسی ادمین بودن کاربر (با استفاده از تابع کمکی موجود در کد شما)
+    user = update.effective_user
+    chat_id = update.effective_chat.id
+    if not await is_group_admin(user.id, chat_id, context):
+        await update.message.reply_text("❌ شما اجازه استفاده از این دستور را ندارید. این دستور مخصوص مدیران گروه است.")
+        return
+
+    # مرحله ۳: بررسی عضویت اجباری
+    if not await force_join_middleware(update, context): 
+        return
+
+    # مرحله ۴: تعیین متن پیام (پیش‌فرض یا سفارشی)
+    custom_text = " ".join(context.args)
+    
+    if custom_text:
+        # اگر کاربر متن سفارشی وارد کرده بود
+        starter_text = custom_text
+    else:
+        # در غیر این صورت، از متن پیش‌فرض استفاده کن
+        starter_text = "یک موضوع اعتراف جدید شروع شد. برای ارسال اعتراف ناشناس (که به این پیام ریپلای می‌شود)، از دکمه زیر استفاده کنید."
+
+    # مرحله ۵: ارسال پیام و دکمه
+    bot_username = (await context.bot.get_me()).username
+    
+    try:
+        starter_message = await update.message.reply_text(starter_text)
+        keyboard = [[InlineKeyboardButton("🤫 ارسال اعتراف", url=f"https://t.me/{bot_username}?start=eteraf_{chat_id}_{starter_message.message_id}")]]
+        await starter_message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(keyboard))
+    except Exception as e:
+        logger.error(f"Error in eteraf_command: {e}")
+        await update.message.reply_text(f"خطایی در ارسال پیام رخ داد: {e}")
 
 # ======================= این تابع را جایگزین کنید =======================
 async def handle_anonymous_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
