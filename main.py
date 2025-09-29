@@ -578,13 +578,103 @@ async def handle_letter_guess(update: Update, context: ContextTypes.DEFAULT_TYPE
                 del active_games['hangman'][chat_id]
 
 # --------------------------- GAME: GHARCH & ETERAF ---------------------------
-async def gharch_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not await force_join_middleware(update, context): return
-    chat_id = update.effective_chat.id
+# ======================= GAME: GHARCH (نسخه جدید با گاد) =======================
+
+# --- مرحله اول: شروع بازی و درخواست یوزرنیم گاد ---
+async def gharch_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """شروع فرآیند بازی قارچ و ورود به حالت مکالمه."""
+    if not await pre_command_check(update, context): return ConversationHandler.END
+    if update.effective_chat.type == 'private':
+        await update.message.reply_text("این بازی فقط در گروه‌ها قابل اجراست.")
+        return ConversationHandler.END
+        
+    # فقط ادمین‌ها می‌توانند بازی را شروع کنند
+    if not await is_group_admin(update.effective_user.id, update.effective_chat.id, context):
+        await update.message.reply_text("❌ فقط ادمین‌های گروه می‌توانند این بازی را شروع کنند.")
+        return ConversationHandler.END
+    
+    # ذخیره آیدی ادمین شروع کننده
+    context.chat_data['starter_admin_id'] = update.effective_user.id
+    
+    await update.message.reply_text(
+        "🍄 **شروع بازی قارچ**\n\n"
+        "لطفاً یوزرنیم گاد بازی را ارسال کنید (مثال: @GodUsername)."
+    )
+    return ASKING_GOD_USERNAME
+
+# --- مرحله دوم: دریافت یوزرنیم و ارسال درخواست تایید به گاد ---
+async def receive_god_username(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """دریافت یوزرنیم گاد و ارسال پیام تایید."""
+    god_username = update.message.text.strip()
+    if not god_username.startswith('@'):
+        await update.message.reply_text("فرمت اشتباه است. لطفاً یوزرنیم را با @ ارسال کنید.")
+        return ASKING_GOD_USERNAME
+
+    context.chat_data['god_username'] = god_username
+    starter_admin_id = context.chat_data['starter_admin_id']
+
+    keyboard = [[
+        InlineKeyboardButton("✅ تایید می‌کنم", callback_data=f"gharch_confirm_god_{starter_admin_id}")
+    ]]
+    
+    await update.message.reply_text(
+        f"{god_username} عزیز،\n"
+        f"شما به عنوان گاد بازی قارچ انتخاب شدید. لطفاً برای شروع بازی، این مسئولیت را تایید کنید.\n\n"
+        f"⚠️ **نکته:** برای دریافت گزارش‌ها، باید ربات را استارت کرده باشید. /start",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+    return CONFIRMING_GOD
+
+# --- مرحله سوم: تایید نهایی گاد و شروع بازی ---
+async def confirm_god(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """گاد بازی را تایید کرده و بازی رسماً شروع می‌شود."""
+    query = update.callback_query
+    user = query.from_user
+    chat_id = query.message.chat.id
+    
+    starter_admin_id = int(query.data.split('_')[3])
+    god_username = context.chat_data.get('god_username', '').lstrip('@')
+
+    # چک می‌کنیم که فرد درستی دکمه را فشار داده باشد
+    if user.username.lower() != god_username.lower():
+        await query.answer("این درخواست برای شما نیست!", show_alert=True)
+        return CONFIRMING_GOD
+
+    await query.answer("شما به عنوان گاد تایید شدید!")
+    
+    # ذخیره اطلاعات گاد
+    god_id = user.id
+    active_gharch_games[chat_id] = {'god_id': god_id, 'god_username': f"@{god_username}"}
+
+    # ارسال و پین کردن پیام اصلی بازی
     bot_username = (await context.bot.get_me()).username
-    text = "**بازی قارچ 🍄 شروع شد!**\n\nروی دکمه زیر کلیک کن و حرف دلت رو بنویس تا به صورت ناشناس در گروه ظاهر بشه!"
-    keyboard = [[InlineKeyboardButton("🍄 شرکت در بازی قارچ", url=f"https://t.me/{bot_username}?start=gharch_{chat_id}")]]
-    await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.MARKDOWN)
+    game_message_text = (
+        "**بازی قارچ 🍄 شروع شد!**\n\n"
+        "روی دکمه زیر کلیک کن و حرف دلت رو بنویس تا به صورت ناشناس در گروه ظاهر بشه!\n\n"
+        f"*(فقط گاد بازی، {active_gharch_games[chat_id]['god_username']}، از هویت ارسال‌کننده مطلع خواهد شد.)*"
+    )
+    keyboard = [[InlineKeyboardButton("🍄 ارسال پیام ناشناس", url=f"https://t.me/{bot_username}?start=gharch_{chat_id}")]]
+    
+    game_message = await query.message.reply_text(
+        game_message_text,
+        reply_markup=InlineKeyboardMarkup(keyboard),
+        parse_mode=ParseMode.MARKDOWN
+    )
+    
+    try:
+        await context.bot.pin_chat_message(chat_id, game_message.message_id)
+        active_gharch_games[chat_id]['pinned_message_id'] = game_message.message_id
+    except Exception as e:
+        logger.error(f"Failed to pin message in gharch game: {e}")
+
+    await query.edit_message_text(f"بازی قارچ با موفقیت توسط گاد (@{god_username}) شروع شد!")
+    return ConversationHandler.END
+
+# --- تابع برای لغو کردن فرآیند ---
+async def cancel_gharch(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """لغو فرآیند ساخت بازی قارچ."""
+    await update.message.reply_text("فرآیند ساخت بازی قارچ لغو شد.")
+    return ConversationHandler.END
 
 async def eteraf_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await force_join_middleware(update, context): return
@@ -593,18 +683,69 @@ async def eteraf_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [[InlineKeyboardButton("🤫 ارسال اعتراف", url=f"https://t.me/{bot_username}?start=eteraf_{chat_id}_{starter_message.message_id}")]]
     await starter_message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(keyboard))
 
+# ======================= این تابع را جایگزین کنید =======================
 async def handle_anonymous_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_data = context.user_data
-    if 'anon_target_chat' not in user_data: return await update.message.reply_text("لطفا ابتدا از طریق دکمه‌ای که در گروه قرار دارد، فرآیند را شروع کنید.")
-    target_info, game_type, reply_to_id = user_data['anon_target_chat'], user_data['anon_target_chat']['type'], user_data['anon_target_chat'].get('reply_to')
-    header = "#پیام_ناشناس 🍄" if game_type == "gharch" else "#اعتراف_ناشناس 🤫"
+    if 'anon_target_chat' not in user_data:
+        return await update.message.reply_text("لطفاً ابتدا از طریق دکمه‌ای که در گروه قرار دارد، فرآیند را شروع کنید.")
+    
+    # استخراج اطلاعات لازم از user_data
+    target_info = user_data['anon_target_chat']
+    target_chat_id = target_info['id']
+    game_type = target_info['type']
+    message_text = update.message.text
+
     try:
-        await context.bot.send_message(chat_id=target_info['id'], text=f"{header}\n\n{update.message.text}", reply_to_message_id=reply_to_id)
-        await update.message.reply_text("✅ پیامت با موفقیت به صورت ناشناس در گروه ارسال شد.")
+        # --- منطق جدید برای بازی قارچ ---
+        if game_type == "gharch":
+            if target_chat_id in active_gharch_games:
+                sender = update.effective_user
+                god_info = active_gharch_games[target_chat_id]
+                god_id = god_info['god_id']
+
+                # ۱. ارسال پیام ناشناس به گروه
+                await context.bot.send_message(
+                    chat_id=target_chat_id,
+                    text=f"#پیام_ناشناس 🍄\n\n{message_text}"
+                )
+                await update.message.reply_text("✅ پیام شما با موفقیت به صورت ناشناس در گروه ارسال شد.")
+
+                # ۲. ساخت و ارسال گزارش به گاد
+                report_text = (
+                    f"📝 **گزارش پیام ناشناس جدید**\n\n"
+                    f"👤 **ارسال کننده:**\n"
+                    f"- نام: {sender.mention_html()}\n"
+                    f"- یوزرنیم: @{sender.username}\n"
+                    f"- آیدی: `{sender.id}`\n\n"
+                    f"📜 **متن پیام:**\n"
+                    f"{message_text}"
+                )
+                await context.bot.send_message(chat_id=god_id, text=report_text, parse_mode=ParseMode.HTML)
+            else:
+                await update.message.reply_text("این بازی قارچ دیگر فعال نیست یا منقضی شده است.")
+
+        # --- منطق قدیمی برای بازی اعتراف ---
+        elif game_type == "eteraf":
+            reply_to_id = target_info.get('reply_to')
+            header = "#اعتراف_ناشناس 🤫"
+            await context.bot.send_message(
+                chat_id=target_chat_id,
+                text=f"{header}\n\n{message_text}",
+                reply_to_message_id=reply_to_id
+            )
+            await update.message.reply_text("✅ اعتراف شما با موفقیت به صورت ناشناس در گروه ارسال شد.")
+        
+        # --- می‌توانید بازی‌های ناشناس دیگر را در آینده اینجا اضافه کنید ---
+        else:
+            await update.message.reply_text("نوع بازی ناشناس مشخص نیست.")
+
     except Exception as e:
         await update.message.reply_text(f"⚠️ ارسال پیام با خطا مواجه شد: {e}")
+        logger.error(f"Error in handle_anonymous_message for game {game_type}: {e}")
     finally:
-        del context.user_data['anon_target_chat']
+        # در هر صورت، اطلاعات از حافظه موقت کاربر پاک می‌شود
+        if 'anon_target_chat' in context.user_data:
+            del context.user_data['anon_target_chat']
 
 # --------------------------- GAME: TYPE SPEED (با اصلاح عکس) ---------------------------
 def create_typing_image(text: str) -> io.BytesIO:
@@ -673,12 +814,19 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             payload = context.args[0]
             parts = payload.split('_')
             game_type, target_chat_id = parts[0], int(parts[1])
-            if game_type in ["gharch", "eteraf"]:
-                context.user_data['anon_target_chat'] = {'id': target_chat_id, 'type': game_type}
-                if game_type == "eteraf" and len(parts) > 2: context.user_data['anon_target_chat']['reply_to'] = int(parts[2])
-                prompt = "پیام خود را برای ارسال ناشناس در بازی قارچ بنویسید..." if game_type == "gharch" else "اعتراف خود را بنویسید تا به صورت ناشناس در گروه ارسال شود..."
-                await update.message.reply_text(prompt)
-                return
+            if game_type == "gharch":
+                if target_chat_id in active_gharch_games:
+                    god_username = active_gharch_games[target_chat_id]['god_username']
+                    context.user_data['anon_target_chat'] = {'id': target_chat_id, 'type': game_type}
+                    prompt = (
+                        f"پیام خود را برای ارسال ناشناس بنویسید...\n\n"
+                        f"توجه: فقط گاد بازی ({god_username}) هویت شما را خواهد دید."
+                    )
+                    await update.message.reply_text(prompt)
+                    return
+                else:
+                    await update.message.reply_text("این بازی قارچ دیگر فعال نیست.")
+                    return
         except (ValueError, IndexError):
             pass
 
@@ -886,6 +1034,7 @@ async def unban_group_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     except (ValueError, IndexError):
         await update.message.reply_text("لطفا یک آیدی عددی معتبر برای گروه وارد کنید.")
 
+# ======================= این تابع را نیز جایگزین کنید =======================
 async def track_chats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     result = update.chat_member
     if not result: return
@@ -897,20 +1046,33 @@ async def track_chats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     if result.new_chat_member.user.id != context.bot.id:
         return
 
-    # وقتی ربات به گروه اضافه می‌شود
+    # --- وقتی ربات به گروه اضافه می‌شود ---
     if result.new_chat_member.status == 'member' and result.old_chat_member.status != 'member':
         conn = get_db_connection()
         if not conn: return
         
-        # ... (بخش مربوط به چک کردن محدودیت نصب گروه را اینجا نگه دارید) ...
-        # ... (کد مربوط به GROUP_INSTALL_LIMIT) ...
+        # <<<--- شروع بخش اضافه‌شده: چک کردن محدودیت نصب --->>>
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT COUNT(*) FROM groups;")
+                group_count = cur.fetchone()[0]
+            
+            if group_count >= GROUP_INSTALL_LIMIT:
+                await chat.send_message(f"⚠️ ظرفیت نصب این ربات تکمیل شده است! لطفاً با پشتیبانی (@{SUPPORT_USERNAME}) تماس بگیرید.")
+                await context.bot.leave_chat(chat.id)
+                for owner_id in OWNER_IDS:
+                    await context.bot.send_message(owner_id, f"🔔 هشدار: سقف نصب ({GROUP_INSTALL_LIMIT}) تکمیل شد. ربات از گروه `{chat.title}` خارج شد.", parse_mode=ParseMode.MARKDOWN)
+                conn.close()
+                return
+        except Exception as e:
+            logger.error(f"Could not check group install limit: {e}")
+        # <<<--- پایان بخش اضافه‌شده --->>>
 
         member_count = await chat.get_member_count()
         with conn.cursor() as cur:
-            cur.execute("INSERT INTO groups (group_id, title, member_count) VALUES (%s, %s, %s) ON CONFLICT (group_id) DO NOTHING;", (chat.id, chat.title, member_count))
+            cur.execute("INSERT INTO groups (group_id, title, member_count) VALUES (%s, %s, %s) ON CONFLICT (group_id) DO UPDATE SET title = EXCLUDED.title, member_count = EXCLUDED.member_count;", (chat.id, chat.title, member_count))
             conn.commit()
 
-        # <<<--- شروع تغییرات --->>>
         custom_welcome_sent = False
         try:
             with conn.cursor() as cur:
@@ -925,7 +1087,6 @@ async def track_chats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
         if not custom_welcome_sent:
             await chat.send_message("سلام! 👋 من با موفقیت نصب شدم.\nبرای مشاهده لیست بازی‌ها از دستور /help استفاده کنید.")
-        # <<<--- پایان تغییرات --->>>
         
         conn.close()
         
@@ -934,7 +1095,7 @@ async def track_chats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             try: await context.bot.send_message(owner_id, report, parse_mode=ParseMode.HTML)
             except: pass
 
-    # وقتی ربات از گروه حذف می‌شود
+    # --- وقتی ربات از گروه حذف می‌شود ---
     elif result.new_chat_member.status == 'left':
         conn = get_db_connection()
         if conn:
@@ -946,6 +1107,7 @@ async def track_chats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         for owner_id in OWNER_IDS:
             try: await context.bot.send_message(owner_id, report, parse_mode=ParseMode.MARKDOWN)
             except: pass
+                
 # =================================================================
 # ======================== MAIN FUNCTION ==========================
 # =================================================================
@@ -1007,7 +1169,23 @@ def main() -> None:
     application.add_handler(MessageHandler(filters.Regex(r'^[آ-ی]$') & filters.ChatType.GROUPS, handle_letter_guess))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.ChatType.PRIVATE, handle_anonymous_message))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.ChatType.GROUPS, handle_typing_attempt))
-    
+
+    gharch_conv_handler = ConversationHandler(
+        entry_points=[CommandHandler("gharch", gharch_command)],
+        states={
+            ASKING_GOD_USERNAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_god_username)],
+            CONFIRMING_GOD: [CallbackQueryHandler(confirm_god, pattern=r'^gharch_confirm_god_')],
+        },
+        fallbacks=[CommandHandler('cancel', cancel_gharch)],
+        per_user=False, # مکالمه در سطح چت گروه مدیریت می‌شود
+        per_chat=True,
+    )
+    application.add_handler(gharch_conv_handler)
+    # <<<--- پایان بلاک --->>>
+
+    # ... بقیه handler های شما ...
+    application.add_handler(CommandHandler("start", start_command))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.ChatType.PRIVATE, handle_anonymous_message))
     # Chat Member Handler
     application.add_handler(ChatMemberHandler(track_chats, ChatMemberHandler.MY_CHAT_MEMBER))
     
