@@ -154,10 +154,10 @@ def get_card_value(card, hokm_suit, trick_suit):
     return value
 
 # --- تابع اصلی برای ساخت رابط کاربری (صفحه بازی) ---
-async def render_hokm_board(game: dict, context: ContextTypes.DEFAULT_TYPE, user_id: int):
+# ======================= این تابع را جایگزین کنید =======================
+async def render_hokm_board(game: dict, context: ContextTypes.DEFAULT_TYPE):
     """
-    این تابع صفحه بازی (متن و دکمه‌ها) را بر اساس وضعیت فعلی بازی
-    و اینکه کدام بازیکن در حال مشاهده آن است، تولید می‌کند.
+    این تابع صفحه بازی (متن و دکمه‌ها) را بر اساس وضعیت فعلی بازی برای همه تولید می‌کند.
     """
     game_id = game['message_id']
     keyboard = []
@@ -168,7 +168,7 @@ async def render_hokm_board(game: dict, context: ContextTypes.DEFAULT_TYPE, user
         team_a_text = f"🔴 تیم A: {p_names[0]} و {p_names[2]}"
         team_b_text = f"🔵 تیم B: {p_names[1]} و {p_names[3]}"
         
-        table_cards = [" "]*4
+        table_cards = ["➖"]*4
         for play in game.get('current_trick', []):
             player_index = next((i for i, p in enumerate(game['players']) if p['id'] == play['player_id']), -1)
             if player_index != -1:
@@ -177,76 +177,44 @@ async def render_hokm_board(game: dict, context: ContextTypes.DEFAULT_TYPE, user
         board_layout = [
             [InlineKeyboardButton(team_a_text, callback_data=f"hokm_noop_{game_id}")],
             [InlineKeyboardButton(team_b_text, callback_data=f"hokm_noop_{game_id}")],
-            [
-                InlineKeyboardButton(f"{p_names[0]}", callback_data=f"hokm_noop_{game_id}"),
-                InlineKeyboardButton(table_cards[0], callback_data=f"hokm_noop_{game_id}")
-            ],
-            [
-                InlineKeyboardButton(f"{p_names[1]}", callback_data=f"hokm_noop_{game_id}"),
-                InlineKeyboardButton(table_cards[1], callback_data=f"hokm_noop_{game_id}")
-            ],
-            [
-                InlineKeyboardButton(f"{p_names[2]}", callback_data=f"hokm_noop_{game_id}"),
-                InlineKeyboardButton(table_cards[2], callback_data=f"hokm_noop_{game_id}")
-            ],
-            [
-                InlineKeyboardButton(f"{p_names[3]}", callback_data=f"hokm_noop_{game_id}"),
-                InlineKeyboardButton(table_cards[3], callback_data=f"hokm_noop_{game_id}")
-            ],
+            [InlineKeyboardButton("بازیکن", callback_data=f"hokm_noop_{game_id}"), InlineKeyboardButton("کارت بازی شده", callback_data=f"hokm_noop_{game_id}")],
+            [InlineKeyboardButton(p_names[0], callback_data=f"hokm_noop_{game_id}"), InlineKeyboardButton(table_cards[0], callback_data=f"hokm_noop_{game_id}")],
+            [InlineKeyboardButton(p_names[1], callback_data=f"hokm_noop_{game_id}"), InlineKeyboardButton(table_cards[1], callback_data=f"hokm_noop_{game_id}")],
+            [InlineKeyboardButton(p_names[2], callback_data=f"hokm_noop_{game_id}"), InlineKeyboardButton(table_cards[2], callback_data=f"hokm_noop_{game_id}")],
+            [InlineKeyboardButton(p_names[3], callback_data=f"hokm_noop_{game_id}"), InlineKeyboardButton(table_cards[3], callback_data=f"hokm_noop_{game_id}")],
         ]
         keyboard.extend(board_layout)
-    else: # mode == '2p'
-        p_names = [p['name'] for p in game['players']]
-        p1_card = card_to_persian(game['current_trick'][0]['card']) if game.get('current_trick') else " "
-        p2_card = card_to_persian(game['current_trick'][1]['card']) if len(game.get('current_trick', [])) > 1 else " "
-
-        board_layout = [
-            [
-                InlineKeyboardButton(f"{p_names[0]}: {p1_card}", callback_data=f"hokm_noop_{game_id}"),
-                InlineKeyboardButton(f"{p_names[1]}: {p2_card}", callback_data=f"hokm_noop_{game_id}")
-            ]
-        ]
-        keyboard.extend(board_layout)
+    # حالت دو نفره (در صورت نیاز)
+    # else: ...
 
     # --- بخش نمایش وضعیت و امتیازات ---
     hokm_suit_fa = card_to_persian(f"{game['hokm_suit']}2")[0] if game.get('hokm_suit') else '❓'
     hakem_name = game.get('hakem_name', '...')
     
     if game['mode'] == '4p':
-        trick_score_text = f"🔴 {game['trick_scores']['A']} - {game['trick_scores']['B']} 🔵"
+        trick_score_text = f"دست: 🔴 {game['trick_scores']['A']} - {game['trick_scores']['B']} 🔵"
         game_score_text = f"امتیاز کل: 🔴 {game['game_scores']['A']} - {game['game_scores']['B']} 🔵"
-    else: # mode == '2p'
-        trick_score_text = f"دست: {game['trick_scores']['p1']} - {game['trick_scores']['p2']}"
-        game_score_text = f"امتیاز کل: {game['game_scores']['p1']} - {game['game_scores']['p2']}"
 
-    status_row = [
-        InlineKeyboardButton(f"حاکم: {hakem_name}", callback_data=f"hokm_noop_{game_id}"),
-        InlineKeyboardButton(f"حکم: {hokm_suit_fa}", callback_data=f"hokm_noop_{game_id}"),
-    ]
-    keyboard.append(status_row)
+    keyboard.append([InlineKeyboardButton(f"حاکم: {hakem_name}", callback_data=f"hokm_noop_{game_id}"), InlineKeyboardButton(f"حکم: {hokm_suit_fa}", callback_data=f"hokm_noop_{game_id}")])
     keyboard.append([InlineKeyboardButton(trick_score_text, callback_data=f"hokm_noop_{game_id}")])
     keyboard.append([InlineKeyboardButton(game_score_text, callback_data=f"hokm_noop_{game_id}")])
 
-    # --- بخش دکمه‌های کنترلی (دست من، بازی کردن کارت) ---
-    control_row = [InlineKeyboardButton("🃏 دست من", callback_data=f"hokm_showhand_{game_id}")]
-    keyboard.append(control_row)
+    # --- بخش دکمه‌های کنترلی ---
+    keyboard.append([InlineKeyboardButton("🃏 نمایش دست من (خصوصی)", callback_data=f"hokm_showhand_{game_id}")])
 
-    # --- نمایش دکمه‌های بازی کردن کارت فقط برای بازیکنی که نوبتش است ---
-    if game['status'] == 'playing':
+    # --- نمایش دکمه‌های مربوط به وضعیت فعلی بازی ---
+    if game['status'] == 'hakem_choosing':
+        keyboard.append([InlineKeyboardButton(s, callback_data=f"hokm_choose_{game_id}_{s[0]}") for s in ["♠️", "♥️", "♦️", "♣️"]])
+
+    elif game['status'] == 'playing':
         current_turn_player_id = game['players'][game['turn_index']]['id']
-        if user_id == current_turn_player_id:
-            player_hand = sorted(game['hands'][user_id])
-            # ساخت دکمه‌های شماره‌دار برای هر کارت
-            card_buttons = [
-                InlineKeyboardButton(str(i + 1), callback_data=f"hokm_play_{game_id}_{i}")
-                for i in range(len(player_hand))
-            ]
-            # تقسیم دکمه‌ها به ردیف‌های ۵تایی برای خوانایی
-            for i in range(0, len(card_buttons), 5):
-                keyboard.append(card_buttons[i:i+5])
+        player_hand = game['hands'][current_turn_player_id]
+        card_buttons = [InlineKeyboardButton(str(i + 1), callback_data=f"hokm_play_{game_id}_{i}") for i in range(len(player_hand))]
+        for i in range(0, len(card_buttons), 7): # دکمه‌ها در ردیف‌های ۷تایی
+            keyboard.append(card_buttons[i:i+7])
     
     return InlineKeyboardMarkup(keyboard)
-
+    
 # --- تابع مدیریت دستور اولیه بازی ---
 async def hokm_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """دستور اولیه برای شروع بازی و انتخاب حالت ۲ یا ۴ نفره."""
@@ -265,6 +233,7 @@ async def hokm_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # --- تابع اصلی برای مدیریت تمام تعاملات بازی ---
 # ======================= فقط این تابع را جایگزین کنید =======================
+# ======================= این تابع را هم جایگزین کنید =======================
 async def hokm_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     user = query.from_user
@@ -277,31 +246,20 @@ async def hokm_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = query.data.split('_')
     action = data[1]
 
-    # --- شروع یک بازی جدید ---
     if action == "start":
         await query.answer()
-        mode = data[2]
-        max_players = 4 if mode == '4p' else 2
-        
-        if chat_id not in active_games['hokm']:
-            active_games['hokm'][chat_id] = {}
-            
+        mode = data[2]; max_players = 4 if mode == '4p' else 2
+        if chat_id not in active_games['hokm']: active_games['hokm'][chat_id] = {}
         msg = await query.edit_message_text(f"بازی حکم {max_players} نفره! منتظر ورود بازیکنان...")
         game_id = msg.message_id
-        
         active_games['hokm'][chat_id][game_id] = {
-            "status": "joining",
-            "mode": mode,
-            "players": [{'id': user.id, 'name': user.first_name}],
-            "message_id": game_id,
-            "starter_id": user.id,
+            "status": "joining", "mode": mode, "players": [{'id': user.id, 'name': user.first_name}],
+            "message_id": game_id, "starter_id": user.id,
         }
-        
         keyboard = [[InlineKeyboardButton(f"Join Game (1/{max_players})", callback_data=f"hokm_join_{game_id}")]]
         await query.edit_message_reply_markup(reply_markup=InlineKeyboardMarkup(keyboard))
         return
 
-    # از اینجا به بعد، تمام اکشن‌ها نیاز به game_id دارند
     game_id = int(data[2])
     if chat_id not in active_games['hokm'] or game_id not in active_games['hokm'][chat_id]:
         await query.answer("این بازی دیگر فعال نیست.", show_alert=True)
@@ -311,17 +269,11 @@ async def hokm_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     game = active_games['hokm'][chat_id][game_id]
 
-    # --- اکشن پیوستن به بازی ---
     if action == "join":
-        if any(p['id'] == user.id for p in game['players']):
-            await query.answer("شما قبلاً به بازی پیوسته‌اید!", show_alert=True)
-            return
-
+        if any(p['id'] == user.id for p in game['players']): return await query.answer("شما قبلاً به بازی پیوسته‌اید!", show_alert=True)
         max_players = 4 if game['mode'] == '4p' else 2
-        if len(game['players']) >= max_players:
-            await query.answer("ظرفیت بازی تکمیل است.", show_alert=True)
-            return
-            
+        if len(game['players']) >= max_players: return await query.answer("ظرفیت بازی تکمیل است.", show_alert=True)
+        
         await query.answer()
         game['players'].append({'id': user.id, 'name': user.first_name})
         num_players = len(game['players'])
@@ -346,17 +298,13 @@ async def hokm_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 game.update({"hakem_id": game['players'][0]['id'], "hakem_name": game['players'][0]['name']})
 
             game['status'] = 'hakem_choosing'
-            keyboard = [[InlineKeyboardButton(s, callback_data=f"hokm_choose_{game_id}_{s[0]}") for s in ["♠️", "♥️", "♦️", "♣️"]]]
-            
-            await query.edit_message_text(f"بازیکنان کامل شدند!\nحاکم: **{game['hakem_name']}**\n\nحاکم عزیز، بر اساس ۵ کارت اول خود، حکم را انتخاب کنید.",
-                reply_markup=InlineKeyboardMarkup(keyboard) if user.id == game['hakem_id'] else None)
+            reply_markup = await render_hokm_board(game, context)
+            await query.edit_message_text(f"بازیکنان کامل شدند!\nحاکم: **{game['hakem_name']}**\n\nحاکم عزیز، بر اساس ۵ کارت اول خود، حکم را انتخاب کنید.", reply_markup=reply_markup)
 
-    # --- اکشن انتخاب حکم ---
     elif action == "choose":
-        if user.id != game.get('hakem_id'): return await query.answer("فقط حاکم می‌تواند حکم را انتخاب کند!", show_alert=True)
+        if user.id != game.get('hakem_id'): return await query.answer("شما حاکم نیستید!", show_alert=True)
         await query.answer()
         game['hokm_suit'] = data[3]
-        
         for p in game['players']:
             while len(game['hands'][p['id']]) < 13: game['hands'][p['id']].append(game['deck'].pop(0))
         
@@ -364,21 +312,15 @@ async def hokm_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         game['turn_index'] = next(i for i, p in enumerate(game['players']) if p['id'] == game['hakem_id'])
         
         turn_player_name = game['players'][game['turn_index']]['name']
-        reply_markup = await render_hokm_board(game, context, user.id) # Render for the clicking user
+        reply_markup = await render_hokm_board(game, context)
         await query.edit_message_text(f"بازی شروع شد! حکم: **{card_to_persian(game['hokm_suit']+'2')[0]}**\n\nنوبت **{turn_player_name}** است.", reply_markup=reply_markup)
 
-    # --- اکشن نمایش دست به صورت خصوصی ---
     elif action == "showhand":
         if not any(p['id'] == user.id for p in game['players']): return await query.answer("شما بازیکن این مسابقه نیستید!", show_alert=True)
         hand = sorted(game['hands'][user.id])
         hand_str = "\n".join([f"{i+1}. {card_to_persian(c)}" for i, c in enumerate(hand)]) or "شما کارتی در دست ندارید."
         await query.answer(f"دست شما:\n{hand_str}", show_alert=True)
-        
-        reply_markup = await render_hokm_board(game, context, user.id)
-        try: await query.edit_message_reply_markup(reply_markup=reply_markup)
-        except: pass
 
-    # --- اکشن بازی کردن یک کارت ---
     elif action == "play":
         if user.id != game['players'][game['turn_index']]['id']: return await query.answer("نوبت شما نیست!", show_alert=True)
         card_index = int(data[3]); hand = sorted(game['hands'][user.id])
@@ -398,7 +340,6 @@ async def hokm_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             trick_suit = game['current_trick'][0]['card'][0]
             winning_play = max(game['current_trick'], key=lambda p: get_card_value(p['card'], game['hokm_suit'], trick_suit))
             winner_id = winning_play['player_id']
-            
             winner_team = 'A' if winner_id in [game['players'][0]['id'], game['players'][2]['id']] else 'B'
             game['trick_scores'][winner_team] += 1
             game['turn_index'] = next(i for i, p in enumerate(game['players']) if p['id'] == winner_id)
@@ -413,40 +354,31 @@ async def hokm_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     await query.edit_message_text(f"🏆 **بازی تمام شد!** 🏆\n\nبرنده نهایی: **تیم {winning_team_name}**")
                     del active_games['hokm'][chat_id][game_id]; return
                 
-                # --- منطق جدید انتخاب حاکم بعدی ---
                 current_hakem_id = game['hakem_id']
                 current_hakem_index = next(i for i, p in enumerate(game['players']) if p['id'] == current_hakem_id)
                 hakem_team = 'A' if current_hakem_id in [game['players'][0]['id'], game['players'][2]['id']] else 'B'
-
-                if winning_team_name == hakem_team: # اگر تیم حاکم برد
-                    next_hakem_index = current_hakem_index # حاکم ثابت می‌ماند
-                else: # اگر تیم حاکم باخت
-                    next_hakem_index = (current_hakem_index + 1) % num_players # حاکم به نفر بعد منتقل می‌شود
+                next_hakem_index = current_hakem_index if winning_team_name == hakem_team else (current_hakem_index + 1) % num_players
                 
-                # ریست کردن وضعیت برای دست جدید
                 game.update({ "status": "dealing_first_5", "deck": create_deck(), "hands": {p['id']: [] for p in game['players']}, "trick_scores": {'A': 0, 'B': 0} })
                 for _ in range(5):
                     for p in game['players']: game['hands'][p['id']].append(game['deck'].pop(0))
-
                 game['hakem_id'] = game['players'][next_hakem_index]['id']
                 game['hakem_name'] = game['players'][next_hakem_index]['name']
                 game['status'] = 'hakem_choosing'
 
-                keyboard = [[InlineKeyboardButton(s, callback_data=f"hokm_choose_{game_id}_{s[0]}") for s in ["♠️", "♥️", "♦️", "♣️"]]]
                 score_text = f"امتیاز کل: 🔴 {game['game_scores']['A']} - {game['game_scores']['B']} 🔵"
-                await query.edit_message_text(f"دست تمام شد! برنده: **تیم {winning_team_name}**\n\n{score_text}\n\nحاکم جدید: **{game['hakem_name']}**\nمنتظر انتخاب حکم...",
-                    reply_markup=InlineKeyboardMarkup(keyboard) if user.id == game['hakem_id'] else None)
-                
-            else: # اگر دست تمام نشده، فقط صفحه را آپدیت می‌کنیم
+                reply_markup = await render_hokm_board(game, context)
+                await query.edit_message_text(f"دست تمام شد! برنده: **تیم {winning_team_name}**\n\n{score_text}\n\nحاکم جدید: **{game['hakem_name']}**\nمنتظر انتخاب حکم...", reply_markup=reply_markup)
+            
+            else:
                 turn_player_name = game['players'][game['turn_index']]['name']
-                reply_markup = await render_hokm_board(game, context, user.id)
+                reply_markup = await render_hokm_board(game, context)
                 await query.edit_message_text(f"حکم: **{card_to_persian(game['hokm_suit']+'2')[0]}**\n\nنوبت **{turn_player_name}** است.", reply_markup=reply_markup)
         
-        else: # اگر هنوز همه بازی نکرده‌اند، نوبت را به نفر بعد می‌دهیم
+        else:
             game['turn_index'] = (game['turn_index'] + 1) % num_players
             turn_player_name = game['players'][game['turn_index']]['name']
-            
-            reply_markup = await render_hokm_board(game, context, user.id)
+            reply_markup = await render_hokm_board(game, context)
             await query.edit_message_text(f"حکم: **{card_to_persian(game['hokm_suit']+'2')[0]}**\n\nنوبت **{turn_player_name}** است.", reply_markup=reply_markup)
             
     elif action == "noop":
