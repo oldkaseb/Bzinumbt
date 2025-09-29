@@ -433,7 +433,7 @@ async def receive_range(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
         return SELECTING_RANGE
     secret_number = random.randint(min_range, max_range)
     active_games['guess_number'][chat.id] = {"number": secret_number}
-    await update.message.reply_text(f"🎲 **بازی حدس عدد شروع شد!** 🎲\n\nیک عدد بین **{min_range}** و **{max_range}** انتخاب کرده‌ام.", parse_mode=ParseMode.MARKDOWN)
+    await update.message.reply_text(f"🎲 **بازی حدس عدد شروع شد!** 🎲\n\nیک عدد بین **{min_range}** و **{max_range}** انتخاب شده.", parse_mode=ParseMode.MARKDOWN)
     return GUESSING
 
 async def handle_guess_conversation(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -649,6 +649,7 @@ async def receive_god_username(update: Update, context: ContextTypes.DEFAULT_TYP
     return CONFIRMING_GOD
 
 # --- مرحله سوم: تایید نهایی گاد و شروع بازی ---
+# ======================= فقط این تابع را به طور کامل جایگزین کنید =======================
 async def confirm_god(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """گاد بازی را تایید کرده و بازی رسماً شروع می‌شود."""
     query = update.callback_query
@@ -656,41 +657,45 @@ async def confirm_god(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
     chat_id = query.message.chat.id
     
     starter_admin_id = int(query.data.split('_')[3])
-    god_username = context.chat_data.get('god_username', '').lstrip('@')
+    god_username_from_admin = context.chat_data.get('god_username', '').lower().lstrip('@')
 
-    # چک می‌کنیم که فرد درستی دکمه را فشار داده باشد
-    if user.username.lower() != god_username.lower():
-        await query.answer("این درخواست برای شما نیست!", show_alert=True)
-        return CONFIRMING_GOD
+    # <<<--- شروع تغییرات اصلی (شرط امنیتی جدید و قوی‌تر) --->>>
+    # چک می‌کنیم که کاربر کلیک‌کننده حتما یوزرنیم داشته باشد و یوزرنیم او با چیزی که ادمین وارد کرده مطابقت داشته باشد
+    if not user.username or user.username.lower() != god_username_from_admin:
+        await query.answer("این درخواست برای شما نیست، یا یوزرنیم تلگرام شما تنظیم نشده است.", show_alert=True)
+        return CONFIRMING_GOD # در همین مرحله باقی می‌ماند تا گاد اصلی کلیک کند
+    # <<<--- پایان تغییرات اصلی --->>>
 
     await query.answer("شما به عنوان گاد تایید شدید!")
     
-    # ذخیره اطلاعات گاد
+    # حالا که هویت گاد تایید شده، اطلاعات نهایی را ذخیره می‌کنیم
     god_id = user.id
-    active_gharch_games[chat_id] = {'god_id': god_id, 'god_username': f"@{god_username}"}
+    god_username_display = f"@{user.username}"
+    active_gharch_games[chat_id] = {'god_id': god_id, 'god_username': god_username_display}
 
-    # ارسال و پین کردن پیام اصلی بازی
+    # متن و دکمه جدید برای پیام اصلی بازی را تعریف می‌کنیم
     bot_username = (await context.bot.get_me()).username
     game_message_text = (
         "**بازی قارچ 🍄 شروع شد!**\n\n"
         "روی دکمه زیر کلیک کن و حرف دلت رو بنویس تا به صورت ناشناس در گروه ظاهر بشه!\n\n"
-        f"*(فقط گاد بازی، {active_gharch_games[chat_id]['god_username']}، از هویت ارسال‌کننده مطلع خواهد شد.)*"
+        f"*(فقط گاد بازی، {god_username_display}، از هویت ارسال‌کننده مطلع خواهد شد.)*"
     )
     keyboard = [[InlineKeyboardButton("🍄 ارسال پیام ناشناس", url=f"https://t.me/{bot_username}?start=gharch_{chat_id}")]]
     
-    game_message = await query.message.reply_text(
-        game_message_text,
+    # همان پیام فعلی را ویرایش می‌کنیم
+    await query.edit_message_text(
+        text=game_message_text,
         reply_markup=InlineKeyboardMarkup(keyboard),
         parse_mode=ParseMode.MARKDOWN
     )
     
+    # پیام ویرایش‌شده را پین می‌کنیم
     try:
-        await context.bot.pin_chat_message(chat_id, game_message.message_id)
-        active_gharch_games[chat_id]['pinned_message_id'] = game_message.message_id
+        await context.bot.pin_chat_message(chat_id, query.message.message_id)
+        active_gharch_games[chat_id]['pinned_message_id'] = query.message.message_id
     except Exception as e:
         logger.error(f"Failed to pin message in gharch game: {e}")
 
-    await query.edit_message_text(f"بازی قارچ با موفقیت توسط گاد (@{god_username}) شروع شد!")
     return ConversationHandler.END
 
 # --- تابع برای لغو کردن فرآیند ---
