@@ -1560,6 +1560,45 @@ async def track_chats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         for owner_id in OWNER_IDS:
             try: await context.bot.send_message(owner_id, report, parse_mode=ParseMode.MARKDOWN)
             except: pass
+
+async def stop_games_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    دستور لغو تمام بازی‌های فعال در یک گروه توسط ادمین.
+    این دستور بازی‌های ناشناس (قارچ) را لغو نمی‌کند.
+    """
+    chat = update.effective_chat
+    user = update.effective_user
+
+    # ۱. این دستور فقط در گروه‌ها کار می‌کند
+    if chat.type == 'private':
+        await update.message.reply_text("این دستور فقط در گروه‌ها قابل استفاده است.")
+        return
+
+    # ۲. فقط ادمین‌ها می‌توانند از این دستور استفاده کنند
+    if not await is_group_admin(user.id, chat.id, context):
+        await update.message.reply_text("❌ شما اجازه استفاده از این دستور را ندارید. این دستور مخصوص مدیران است.")
+        return
+        
+    chat_id = chat.id
+    canceled_count = 0
+
+    # ۳. لیست بازی‌هایی که باید لغو شوند
+    # بازی قارچ (gharch) در این لیست نیست
+    games_to_cancel = ['hangman', 'typing', 'guess_number']
+
+    for game_key in games_to_cancel:
+        # بررسی می‌کند آیا بازی از این نوع در این گروه فعال است یا خیر
+        if chat_id in active_games.get(game_key, {}):
+            # حذف تمام بازی‌های فعال آن نوع از گروه فعلی
+            del active_games[game_key][chat_id]
+            canceled_count += 1
+            
+    # ۴. ارسال پیام نتیجه به ادمین
+    if canceled_count > 0:
+        await update.message.reply_text(f"✅ با موفقیت {canceled_count} نوع بازی فعال لغو شد.")
+    else:
+        await update.message.reply_text("هیچ بازی فعالی برای لغو کردن در این گروه وجود نداشت.")
+
 # =================================================================
 # ======================== MAIN FUNCTION ==========================
 # =================================================================
@@ -1610,6 +1649,8 @@ def main() -> None:
     # --- Command Handlers ---
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("rsgame", rsgame_command))
+
+    application.add_handler(CommandHandler("stop", stop_games_command))
     
     # دستورات مالک ربات
     application.add_handler(CommandHandler("setstart", set_start_command, filters=filters.User(OWNER_IDS)))
