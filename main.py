@@ -286,37 +286,40 @@ async def check_forced_join(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     return False
 
 async def rsgame_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """دستور اصلی برای نمایش پنل بازی‌ها با بررسی اولیه عضویت."""
+    """دستور اصلی برای نمایش پنل بازی‌ها با بررسی اولیه عضویت و به صورت اختصاصی."""
     if await check_ban_status(update, context):
         return
     
     user = update.effective_user
+    user_id = user.id  # شناسه کاربری که دستور را زده است
     is_member = False
-    if await is_owner(user.id):
+
+    if await is_owner(user_id):
         is_member = True
     else:
         try:
-            member = await context.bot.get_chat_member(chat_id=FORCED_JOIN_CHANNEL, user_id=user.id)
+            member = await context.bot.get_chat_member(chat_id=FORCED_JOIN_CHANNEL, user_id=user_id)
             if member.status in ['member', 'administrator', 'creator']:
                 is_member = True
         except Exception:
             is_member = False 
 
-    # اگر کاربر عضو بود، پنل اصلی را نشان بده
     if is_member:
-        text = "🎮 به پنل بازی خوش آمدید.\n\nلطفا دسته بندی مورد نظر خود را انتخاب کنید:"
+        text = f"🎮 {user.first_name} عزیز، به پنل بازی خوش آمدید.\n\nلطفا دسته بندی مورد نظر خود را انتخاب کنید:"
+        
+        # شناسه کاربر به انتهای callback_data اضافه می‌شود تا پنل اختصاصی شود
         keyboard = [
-            [InlineKeyboardButton("🏆 بازی‌های کارتی و گروهی", callback_data="rsgame_cat_board")],
-            [InlineKeyboardButton("✍️ بازی‌های تایپی و سرعتی", callback_data="rsgame_cat_typing")],
-            [InlineKeyboardButton("🤫 بازی‌های ناشناس (ویژه ادمین)", callback_data="rsgame_cat_anon")],
-            [InlineKeyboardButton("✖️ بستن پنل", callback_data="rsgame_close")]
+            [InlineKeyboardButton("🏆 بازی‌های کارتی و گروهی", callback_data=f"rsgame_cat_board_{user_id}")],
+            [InlineKeyboardButton("✍️ بازی‌های تایپی و سرعتی", callback_data=f"rsgame_cat_typing_{user_id}")],
+            [InlineKeyboardButton("🤫 بازی‌های ناشناس (ویژه ادمین)", callback_data=f"rsgame_cat_anon_{user_id}")],
+            [InlineKeyboardButton("✖️ بستن پنل", callback_data=f"rsgame_close_{user_id}")]
         ]
+        
         if update.message:
             await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
         elif update.callback_query:
             await update.callback_query.answer()
             await update.callback_query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
-    # اگر کاربر عضو نبود، پنل عضویت را نشان بده
     else:
         text = "❗️برای استفاده از بازی‌ها، لطفا ابتدا در کانال ما عضو شوید و سپس دکمه «عضو شدم» را بزنید."
         keyboard = [
@@ -346,56 +349,73 @@ async def rsgame_check_join_callback(update: Update, context: ContextTypes.DEFAU
         await query.answer("خطایی در بررسی عضویت رخ داد. لطفاً لحظاتی دیگر دوباره تلاش کنید.", show_alert=True)
 
 async def rsgame_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """مدیریت دکمه‌های پنل اصلی بازی‌ها."""
+    """مدیریت دکمه‌های پنل اصلی بازی‌ها و بررسی مالکیت پنل."""
     query = update.callback_query
+    
+    # -- بخش جدید: بررسی مالکیت پنل --
+    data = query.data.split('_')
+    try:
+        # آخرین بخش callback_data همیشه آیدی کاربر است
+        target_user_id = int(data[-1]) 
+    except (ValueError, IndexError):
+        await query.answer("خطا: این دکمه منقضی شده است. لطفاً دوباره دستور را ارسال کنید.", show_alert=True)
+        return
+
+    clicker_user_id = query.from_user.id
+
+    if clicker_user_id != target_user_id:
+        await query.answer("این پنل برای شما نیست!", show_alert=True)
+        return
+    # -- پایان بخش جدید --
+
     await query.answer()
     
     if await check_ban_status(update, context):
         return
 
-    command = query.data.split('_')
-    action_type = command[1]
+    action_type = data[1]
     
-    # برای دکمه بازگشت به منوی اصلی
-    if len(command) > 2 and command[2] == "main":
+    if len(data) > 2 and data[2] == "main":
         await rsgame_command(update, context)
         return
         
-    if action_type == "close":
-        await query.edit_message_text("پنل بسته شد.")
-        return
+    # این بخش به تابع جداگانه منتقل شد، پس اینجا نیازی به آن نیست
+    # if action_type == "close":
+    #    await query.edit_message_text("پنل بسته شد.")
+    #    return
 
-    category = command[2]
+    category = data[2]
+    user_id = target_user_id
     text = "لطفا بازی مورد نظر خود را انتخاب کنید:"
     keyboard = []
     
     if category == "board":
-        text = "🏆 دسته بندی بازی‌های کارتی و گروهی:\n(عضویت در کانال برای پیوستن به بازی الزامی است)\n @RHINOSOUL_TM کانال ما"
+        text = " دسته بندی بازی‌های کارتی و گروهی:\n\n(عضویت در کانال برای پیوستن به بازی الزامی است)"
         keyboard = [
-            [InlineKeyboardButton(" حکم ۲ نفره ", callback_data="hokm_start_2p"), InlineKeyboardButton(" حکم ۴ نفره ", callback_data="hokm_start_4p")],
-            [InlineKeyboardButton(" دوز (دو نفره) ", callback_data="dooz_start_2p")],
-            [InlineKeyboardButton(" بازگشت ", callback_data="rsgame_cat_main")]
+            [InlineKeyboardButton(" حکم ۲ نفره ", callback_data=f"hokm_start_2p_{user_id}")],
+            [InlineKeyboardButton(" حکم ۴ نفره ", callback_data=f"hokm_start_4p_{user_id}")],
+            [InlineKeyboardButton(" دوز (دو نفره) ", callback_data=f"dooz_start_2p_{user_id}")],
+            [InlineKeyboardButton(" بازگشت ", callback_data=f"rsgame_cat_main_{user_id}")]
         ]
     elif category == "typing":
-        text = "✍️ دسته بندی بازی‌های تایپی و سرعتی (بدون اجبار عضویت):"
+        text = " دسته بندی بازی‌های تایپی و سرعتی (بدون اجبار عضویت):"
         keyboard = [
-            [InlineKeyboardButton(" حدس کلمه ", callback_data="hads_kalame_start")],
-            [InlineKeyboardButton(" تایپ سرعتی ", callback_data="type_start")],
-            [InlineKeyboardButton(" حدس عدد (ویژه ادمین)", callback_data="hads_addad_start")],
-            [InlineKeyboardButton(" بازگشت ", callback_data="rsgame_cat_main")]
+            [InlineKeyboardButton(" حدس کلمه ", callback_data=f"hads_kalame_start_{user_id}")],
+            [InlineKeyboardButton(" تایپ سرعتی ", callback_data=f"type_start_{user_id}")],
+            [InlineKeyboardButton(" حدس عدد (ویژه ادمین)", callback_data=f"hads_addad_start_{user_id}")],
+            [InlineKeyboardButton(" بازگشت ", callback_data=f"rsgame_cat_main_{user_id}")]
         ]
     elif category == "anon":
-        # چک کردن ادمین بودن برای دسترسی به بخش ناشناس
-        if not await is_group_admin(query.from_user.id, query.message.chat.id, context):
+        if not await is_group_admin(clicker_user_id, query.message.chat.id, context):
             await query.answer("این بخش فقط برای مدیران گروه در دسترس است.", show_alert=True)
             return
             
-        text = "🤫 دسته بندی بازی‌های ناشناس (ویژه ادمین):"
+        text = " دسته بندی بازی‌های ناشناس (ویژه ادمین):"
         keyboard = [
-            [InlineKeyboardButton(" اعتراف (متن پیش‌فرض) ", callback_data="eteraf_start_default")],
-            [InlineKeyboardButton(" اعتراف (متن سفارشی) ", callback_data="eteraf_start_custom")],
-            [InlineKeyboardButton(" قارچ (با تظارت گاد بازی) ", callback_data="gharch_start")],
-            [InlineKeyboardButton(" بازگشت ", callback_data="rsgame_cat_main")]
+            [InlineKeyboardButton(" اعتراف (متن پیش‌فرض) ", callback_data=f"eteraf_start_default_{user_id}")],
+            [InlineKeyboardButton(" اعتراف (متن سفارشی) ", callback_data=f"eteraf_start_custom_{user_id}")],
+            [InlineKeyboardButton(" قارچ (با نظارت گاد) ", callback_data=f"gharch_start_{user_id}")],
+            [InlineKeyboardButton(" بازگشت ", callback_data=f"rsgame_cat_main_{user_id}")]
         ]
         
     await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
