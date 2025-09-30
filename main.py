@@ -312,7 +312,7 @@ async def rsgame_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton("🏆 بازی‌های کارتی و گروهی", callback_data=f"rsgame_cat_board_{user_id}")],
             [InlineKeyboardButton("✍️ بازی‌های تایپی و سرعتی", callback_data=f"rsgame_cat_typing_{user_id}")],
             [InlineKeyboardButton("🤫 بازی‌های ناشناس (ویژه ادمین)", callback_data=f"rsgame_cat_anon_{user_id}")],
-            [InlineKeyboardButton("✖️ بستن پنل", callback_data=f"rsgame_close_{user_id}")]
+            #[InlineKeyboardButton("✖️ بستن پنل", callback_data=f"rsgame_close_{user_id}")]
         ]
         
         if update.message:
