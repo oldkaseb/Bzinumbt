@@ -944,7 +944,7 @@ async def hads_kalame_start_callback(update: Update, context: ContextTypes.DEFAU
     word = random.choice(WORD_LIST)
     active_games['hangman'][chat_id] = {"word": word, "display": ["_"] * len(word), "guessed_letters": set(), "players": {}}
     game = active_games['hangman'][chat_id]
-    text = f"🕵️‍♂️ **حدس کلمه (رقابتی) شروع شد!**\n\nهر کاربر {INITIAL_LIVES} جان دارد.\n\nنکته*به صورت تک حرفی حدس بزنید.مثال:(م)*\n\nکلمه: `{' '.join(game['display'])}`"
+    text = f"🕵️‍♂️ **حدس کلمه (رقابتی) شروع شد!**\n\nهر کاربر {INITIAL_LIVES} جان دارد.\n\n|نکته*:|به صورت تک حرفی حدس بزنید.مثال:(م)*\n\nکلمه: `{' '.join(game['display'])}`"
     await query.edit_message_text(text, parse_mode=ParseMode.MARKDOWN)
 
 async def handle_letter_guess(update: Update, context: ContextTypes.DEFAULT_TYPE):
