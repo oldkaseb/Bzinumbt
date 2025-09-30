@@ -370,7 +370,7 @@ async def rsgame_callback_handler(update: Update, context: ContextTypes.DEFAULT_
     keyboard = []
     
     if category == "board":
-        text = "🏆 دسته بندی بازی‌های کارتی و گروهی:\n(عضویت اجباری برای پیوستن به بازی الزامی است)\n @RHINOSOUL_TM کانال ما"
+        text = "🏆 دسته بندی بازی‌های کارتی و گروهی:\n(عضویت در کانال برای پیوستن به بازی الزامی است)\n @RHINOSOUL_TM کانال ما"
         keyboard = [
             [InlineKeyboardButton(" حکم ۲ نفره ", callback_data="hokm_start_2p"), InlineKeyboardButton(" حکم ۴ نفره ", callback_data="hokm_start_4p")],
             [InlineKeyboardButton(" دوز (دو نفره) ", callback_data="dooz_start_2p")],
