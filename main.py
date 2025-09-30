@@ -1635,6 +1635,25 @@ async def text_help_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
 """
     await update.message.reply_text(help_text, parse_mode=ParseMode.MARKDOWN)
 
+async def ping_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    سرعت پاسخ‌دهی (latency) ربات را محاسبه کرده و فقط برای مالک ربات ارسال می‌کند.
+    """
+    # ۱. زمان شروع را قبل از ارسال پیام ثبت می‌کنیم
+    start_time = time.time()
+    
+    # ۲. یک پیام اولیه ارسال می‌کنیم تا بتوانیم آن را ویرایش کنیم
+    message = await update.message.reply_text("...")
+    
+    # ۳. زمان پایان را پس از ارسال پیام ثبت می‌کنیم
+    end_time = time.time()
+    
+    # ۴. اختلاف زمان را محاسبه و به میلی‌ثانیه تبدیل می‌کنیم
+    latency_ms = (end_time - start_time) * 1000
+    
+    # ۵. پیام اولیه را با نتیجه نهایی ویرایش می‌کنیم
+    await message.edit_text(f"من یه کرگدن وحشی همیشه بیدارم\n⚡️ پاسخگویی: {latency_ms:.2f} ms")
+
 # =================================================================
 # ======================== MAIN FUNCTION ==========================
 # =================================================================
@@ -1716,6 +1735,8 @@ def main() -> None:
     application.add_handler(CallbackQueryHandler(dooz_callback, pattern=r'^dooz_'))
 
     application.add_handler(MessageHandler(filters.Regex(r'^راهنما$') & filters.ChatType.GROUPS, text_help_trigger))
+
+    application.add_handler(MessageHandler(filters.Regex(r'^پینگ$') & filters.User(OWNER_IDS), ping_command))
     
     # --- Message Handlers (باید اولویت کمتری داشته باشند) ---
     application.add_handler(MessageHandler(filters.Regex(r'^[آ-ی]$') & filters.ChatType.GROUPS, handle_letter_guess))
