@@ -1653,7 +1653,7 @@ async def ping_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     latency_s = end_time - start_time
     
     # ۵. پیام اولیه را با نتیجه نهایی ویرایش می‌کنیم
-    await message.edit_text(f"راینو گیم آنلاین است!\n\n⚡️پاسخگویی: {latency_ms:.4f} ثانیه")
+    await message.edit_text(f"راینو گیم آنلاین است!\n\n⚡️پاسخگویی: {latency_s:.4f} ثانیه")
 
 # =================================================================
 # ======================== MAIN FUNCTION ==========================
