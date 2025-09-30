@@ -1650,10 +1650,10 @@ async def ping_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     end_time = time.time()
     
     # ۴. اختلاف زمان را محاسبه و به میلی‌ثانیه تبدیل می‌کنیم
-    latency_ms = (end_time - start_time) * 1000
+    latency_s = end_time - start_time
     
     # ۵. پیام اولیه را با نتیجه نهایی ویرایش می‌کنیم
-    await message.edit_text(f"من یه کرگدن وحشی همیشه بیدارم\n⚡️ پاسخگویی: {latency_ms:.2f} ms")
+    await message.edit_text(f"راینو گیم آنلاین است!\n\n⚡️پاسخگویی: {latency_ms:.4f} ثانیه")
 
 # =================================================================
 # ======================== MAIN FUNCTION ==========================
