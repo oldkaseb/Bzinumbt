@@ -27,6 +27,7 @@ import psycopg2
 from PIL import Image, ImageDraw, ImageFont
 import arabic_reshaper
 from bidi.algorithm import get_display
+import time
 
 # --- پیکربندی اصلی ---
 OWNER_IDS = [7662192190, 6041119040] # آیدی‌های عددی ادمین‌های اصلی ربات
