@@ -2596,7 +2596,6 @@ async def memory_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     elif action == "noop":
         await query.answer("این بازی تمام شده است.", show_alert=True)
-
 # =========================== SAMEGAME CODE (START) ==========================
 # --- توابع کمکی SameGame ---
 
