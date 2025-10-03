@@ -1143,7 +1143,7 @@ async def rsgame_callback_handler(update: Update, context: ContextTypes.DEFAULT_
             [InlineKeyboardButton("💠 دوز چهار نفره", callback_data=f"doz4p_start_{user_id}")],
             [InlineKeyboardButton(" چهار در یک ردیف ", callback_data=f"connect4_start_{user_id}")],
             [InlineKeyboardButton(" سنگ کاغذ قیچی ✂️", callback_data=f"rps_start_{user_id}")],
-            [InlineKeyboardButton("🧠 بازی حافظه", callback_data=f"rsgame_cat_memory_{user_id}")],
+            #[InlineKeyboardButton("🧠 بازی حافظه", callback_data=f"rsgame_cat_memory_{user_id}")],
             [InlineKeyboardButton(" بازگشت ", callback_data=f"rsgame_cat_main_{user_id}")]
         ]
     elif category == "memory":
