@@ -1043,7 +1043,7 @@ async def rsgame_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         keyboard = [
             [
-                InlineKeyboardButton("👤 بازی‌های تک‌نفره", callback_data=f"rsgame_cat_single_{user_id}"),
+                #InlineKeyboardButton("👤 بازی‌های تک‌نفره", callback_data=f"rsgame_cat_single_{user_id}"),
                 InlineKeyboardButton("🏆 بازی‌های گروهی", callback_data=f"rsgame_cat_board_{user_id}")
             ],
             [
@@ -4177,7 +4177,7 @@ async def text_help_trigger(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [
             InlineKeyboardButton("🏆 بازی‌های گروهی", callback_data=f"help_cat_board_{user.id}"),
-            InlineKeyboardButton("👤 بازی‌های تک‌نفره", callback_data=f"help_cat_single_{user.id}")
+            #InlineKeyboardButton("👤 بازی‌های تک‌نفره", callback_data=f"help_cat_single_{user.id}")
         ],
         [
             InlineKeyboardButton("✍️ بازی‌های تایپی", callback_data=f"help_cat_typing_{user.id}"),
